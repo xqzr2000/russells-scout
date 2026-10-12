@@ -1,0 +1,41 @@
+{
+  "name": "russells-scout",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": "..",
+    "target": "dev"
+  },
+
+  // Chromium uses /dev/shm for shared memory. Docker's default is 64 MB,
+  // which makes it crash on bigger pages. Upstream crawl4ai uses 1 GB too.
+  "runArgs": ["--shm-size=1g"],
+
+  // Codespaces: pick a machine with at least this much memory (the 2-core / 8 GB default is fine).
+  "hostRequirements": {
+    "memory": "4gb"
+  },
+
+  "remoteUser": "vscode",
+
+  // Install our own package in editable mode: code changes take effect without reinstalling.
+  // --no-deps because the Dockerfile already installed the pinned dependencies.
+  "postCreateCommand": "pip install --no-deps -e .",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.debugpy",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests"],
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        }
+      }
+    }
+  }
+}
