@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "russells-scout"
+version = "0.1.0"
+description = "Project Scout: crawl company career pages, parse job postings, store them for later review."
+requires-python = ">=3.12"
+# Exact pins live in requirements.txt (used by the Dockerfile).
+dependencies = ["crawl4ai==0.9.4"]
+
+[project.scripts]
+scout = "scout.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

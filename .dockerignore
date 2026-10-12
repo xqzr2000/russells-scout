@@ -1,0 +1,10 @@
+.git
+.devcontainer
+.vscode
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+output/
+.env
+*.egg-info

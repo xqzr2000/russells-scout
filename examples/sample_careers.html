@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Careers at Example Corp</title>
+</head>
+<body>
+  <header>
+    <nav><a href="/">Home</a> | <a href="/about">About</a> | <a href="/careers">Careers</a></nav>
+  </header>
+
+  <main>
+    <h1>Join Example Corp</h1>
+    <p>
+      We're a small team building data tools for analytical labs. Below are our open roles.
+      This page is a stand-in for a real company careers page, so you can practise
+      extraction without hitting any website.
+    </p>
+
+    <ul id="jobs">
+      <li class="job-card">
+        <a class="job-title" href="/jobs/101-data-scientist">Data Scientist</a>
+        <span class="job-location">Vancouver, BC</span>
+        <p class="job-summary">Build models on chromatography and spectroscopy data.</p>
+      </li>
+      <li class="job-card">
+        <a class="job-title" href="/jobs/102-ml-engineer">Machine Learning Engineer</a>
+        <span class="job-location">Remote (Canada)</span>
+        <p class="job-summary">Ship and monitor ML services in production.</p>
+      </li>
+      <li class="job-card">
+        <a class="job-title" href="https://jobs.example-ats.com/example-corp/103">AI Agent Developer</a>
+        <span class="job-location">Burnaby, BC (hybrid)</span>
+        <p class="job-summary">Design LLM agents that automate lab reporting.</p>
+      </li>
+    </ul>
+  </main>
+
+  <footer><p>&copy; Example Corp. All rights reserved.</p></footer>
+
+  <!--
+    Many careers pages build their job list with JavaScript after the page loads.
+    This script imitates that: the 4th job only exists once JS has run.
+    A real browser (Playwright/Chromium) sees 4 jobs; a plain HTTP fetch sees 3.
+  -->
+  <script>
+    const li = document.createElement("li");
+    li.className = "job-card";
+    li.innerHTML =
+      '<a class="job-title" href="/jobs/104-data-engineer">Data Engineer</a>' +
+      '<span class="job-location">Vancouver, BC</span>';
+    document.getElementById("jobs").appendChild(li);
+  </script>
+</body>
+</html>

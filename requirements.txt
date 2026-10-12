@@ -1,0 +1,4 @@
+# Runtime dependencies, pinned so Codespaces, local VS Code and the Ubuntu box
+# all run exactly the same versions. Bump deliberately, then rebuild the container.
+crawl4ai==0.9.4
+playwright==1.63.0
