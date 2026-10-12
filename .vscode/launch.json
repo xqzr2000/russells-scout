@@ -1,0 +1,35 @@
+{
+  // Press F5 (Run and Debug) to step through crawl4ai with breakpoints.
+  // "justMyCode": false lets you step INTO crawl4ai's own source, which is the
+  // fastest way to learn what it's doing.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Scout: smoke (real page)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "scout.cli",
+      "args": ["smoke"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Scout: sample (offline careers page)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "scout.cli",
+      "args": ["sample"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Scout: tests",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-v"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}
