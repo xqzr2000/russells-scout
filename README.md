@@ -1,6 +1,6 @@
 # Russell's Scout
 
-This is the stage 1 for Project Scout. A locally hosted searching tool for my agents.
+This is the stage 1 for Project Scout. A locally hosted searching tool for my agents. Web search through LLM consumes too many tokens, I'll build a local tool for this function. 
 
 stage 1: a [crawl4ai](https://github.com/unclecode/crawl4ai) (v0.9.4) job scout
 that runs in a devcontainer, so it behaves the same in GitHub Codespaces, local VS Code, and
@@ -36,23 +36,6 @@ Needs Docker (Engine or Desktop) and the **Dev Containers** extension.
 Open the folder → **Reopen in Container**. Same commands as above.
 Locally you can also run `scout --show-browser smoke` to watch Chromium work (needs a display).
 
-## What's in the repo
-
-```
-.devcontainer/devcontainer.json  how VS Code/Codespaces builds and opens the container
-Dockerfile                       base stage (Python 3.12 + Chromium + crawl4ai) and dev stage
-requirements.txt                 pinned runtime versions (crawl4ai 0.9.4, playwright 1.63.0)
-requirements-dev.txt             pytest, ruff
-src/scout/
-  models.py    JobPosting: the record we store (and later the Postgres row)
-  crawl.py     the ONLY module that talks to crawl4ai
-  extract.py   CSS schema for the sample page + raw dict -> JobPosting cleanup
-  writers.py   JSON output (stage 3 adds Postgres)
-  cli.py       `scout smoke` / `scout sample`
-examples/sample_careers.html     fake careers page, 3 static jobs + 1 added by JavaScript
-tests/test_extract.py            offline tests (no browser, no network)
-.vscode/launch.json              F5 debug configs that step into crawl4ai's source
-```
 
 ## How a crawl works (read `crawl.py` alongside this)
 
