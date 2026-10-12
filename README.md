@@ -1,6 +1,8 @@
-# russells-scout
+# Russell's Scout
 
-Project Scout, stage 1: a [crawl4ai](https://github.com/unclecode/crawl4ai) (v0.9.4) job scout
+This is the stage 1 for Project Scout. A locally hosted searching tool for my agents.
+
+stage 1: a [crawl4ai](https://github.com/unclecode/crawl4ai) (v0.9.4) job scout
 that runs in a devcontainer, so it behaves the same in GitHub Codespaces, local VS Code, and
 (later) a Docker container on the Ubuntu box.
 
