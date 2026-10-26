@@ -11,3 +11,7 @@ output/*
 
 # Secrets
 .env
+
+# Agent secrets (live copy is /srv/scout/secrets/deepseek.env on the box)
+*.env
+!agent/env.example

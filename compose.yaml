@@ -1,0 +1,68 @@
+# Project Scout services on the Ubuntu box.
+#
+# Today: only the agent (Claude Code on DeepSeek). Postgres and the scout
+# runtime are added in Phase 1/2 (docs/architecture-plan.md §13).
+#
+# Host folders live under SCOUT_HOME (default /srv/scout):
+#   ${SCOUT_HOME}/secrets/deepseek.env   your DeepSeek key (mode 600, never in git)
+#   ${SCOUT_HOME}/policy/                live locked settings + hook (root-owned)
+#   ${SCOUT_HOME}/workspace/             the agent's only writable folder
+#
+# The agent never starts on `docker compose up`; sessions are started by
+# agent/run-session.sh with `docker compose run`.
+
+name: scout
+
+services:
+  agent:
+    build:
+      context: ./agent
+    image: scout-agent:dev
+    profiles: ["agent"]
+
+    user: "10001:10001"
+    working_dir: /workspace
+
+    # --- Hardening (plan §5.4, layer 1) ---
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+      - /home/agent:size=256m,uid=10001,gid=10001,mode=0700
+    mem_limit: 3g
+    pids_limit: 512
+    # No Docker socket, no host folders except these two:
+    volumes:
+      - ${SCOUT_HOME:-/srv/scout}/workspace:/workspace
+      - ${SCOUT_HOME:-/srv/scout}/policy:/etc/claude-code:ro
+    # Claude Code never needs Anthropic here; make sure it can't reach it.
+    extra_hosts:
+      - "api.anthropic.com:0.0.0.0"
+      - "statsig.anthropic.com:0.0.0.0"
+      - "console.anthropic.com:0.0.0.0"
+      - "claude.ai:0.0.0.0"
+
+    # --- DeepSeek via Claude Code (plan §5.1) ---
+    env_file:
+      - path: ${SCOUT_HOME:-/srv/scout}/secrets/deepseek.env
+        required: true
+    environment:
+      ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+      ANTHROPIC_MODEL: deepseek-flash
+      ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-flash
+      ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-flash
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-flash
+      CLAUDE_CODE_SUBAGENT_MODEL: deepseek-flash
+      # DeepSeek's guide uses "max"; start low for cost, tune in the Phase 0 bake-off.
+      CLAUDE_CODE_EFFORT_LEVEL: ${SCOUT_EFFORT:-low}
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      DISABLE_AUTOUPDATER: "1"
+      # ANTHROPIC_API_KEY must stay unset (auth conflict with ANTHROPIC_AUTH_TOKEN).
+      # Identity for the agent's local commits (no remote, never pushed).
+      GIT_AUTHOR_NAME: Scout Agent
+      GIT_AUTHOR_EMAIL: scout-agent@localhost
+      GIT_COMMITTER_NAME: Scout Agent
+      GIT_COMMITTER_EMAIL: scout-agent@localhost
+      SCOUT_GUARD_LOG: /workspace/.scout-logs/guard.log

@@ -1,0 +1,53 @@
+{
+  "allowManagedPermissionRulesOnly": true,
+  "allowManagedHooksOnly": true,
+
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "disableBypassPermissionsMode": "disable",
+    "disableAutoMode": "disable",
+
+    "allow": [
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "TodoWrite"
+    ],
+
+    "deny": [
+      "Agent",
+      "WebSearch",
+      "Bash(sudo *)",
+      "Bash(su *)",
+      "Bash(docker *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(sftp *)",
+      "Bash(git push *)",
+      "Bash(git remote *)",
+      "Bash(printenv *)",
+      "Read(//srv/scout/secrets/**)",
+      "Read(//proc/*/environ)",
+      "Edit(//etc/claude-code/**)"
+    ]
+  },
+
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Edit|Write|Grep|Glob|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/etc/claude-code/hooks/guard.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

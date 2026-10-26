@@ -1,23 +1,49 @@
 # Russell's Scout
 
-This is the stage 1 for Project Scout. A locally hosted searching tool for my agents. Web search through LLM consumes too many tokens, I'll build a local tool for this function. 
-
-stage 1: a [crawl4ai](https://github.com/unclecode/crawl4ai) (v0.9.4) job scout
-that runs in a devcontainer, so it behaves the same in GitHub Codespaces, local VS Code, and
-(later) a Docker container on the Ubuntu box.
+Project Scout finds data science, data analysis and ML jobs in Vancouver and stores them in
+PostgreSQL. Scouting scripts run on timers with zero LLM tokens; an agent (Claude Code on the
+DeepSeek API, in a hardened container) builds and repairs those scripts.
+Full design: [docs/architecture-plan.md](docs/architecture-plan.md) (v3.0).
 
 > This project uses Crawl4AI (<https://github.com/unclecode/crawl4ai>) for web data extraction.
 
 ## Roadmap
 
-| Stage | What | Status |
+| Phase | What | Status |
 |---|---|---|
-| 1 | Repo + devcontainer, smoke crawl, offline extraction demo, JSON output | **this commit** |
-| 2 | `targets.yaml`, one extractor per page type (Greenhouse / Lever / Ashby APIs, CSS schemas), rate limits, dedup | next |
-| 3 | Postgres writer + schema, Postgres service in the devcontainer | |
-| 4 | `prod` Docker stage + compose on Ubuntu (host Postgres, scheduling) | |
+| 0 | Claude Code on DeepSeek in a hardened container on the box; locked rules; smoke tests | **setup + smoke tests in this commit** ([box setup](docs/box-setup.md)); capability tests next |
+| 1 | Scouting slice: Postgres, ATS adapters, trust scoring, dedupe (zero tokens) | |
+| 2 | Scout runtime, daily digest, WSL2 sync, backups | |
+| 3 | The agent takes over (sessions on a timer, `CLAUDE.md`, local git repo) | |
+| 4–5 | Discovery and long-run hardening | |
 
-## Getting started
+The crawl4ai scaffold below (devcontainer, `src/scout`, sample extraction) is the starting
+point for Phase 1.
+
+## Repository layout
+
+| Path | What |
+|---|---|
+| `compose.yaml` | Services on the box (today: the agent) |
+| `agent/Dockerfile` | Agent image: Node 22, Claude Code 2.1.310 (pinned), Python, git |
+| `agent/managed-settings/` | Locked permission rules and guard hook (installed read-only on the host) |
+| `agent/run-session.sh` | Start one headless session with a turn limit and timeout |
+| `agent/phase0/` | Smoke tests and guard-rule tests |
+| `docs/` | Architecture plan, box setup, Phase 0 results |
+| `src/scout/`, `tests/`, `Dockerfile`, `.devcontainer/` | crawl4ai scaffold (stage 1) |
+
+## Agent on the Ubuntu box
+
+Step by step from WSL2: [docs/box-setup.md](docs/box-setup.md). In short:
+
+```bash
+docker compose --profile agent build agent
+agent/phase0/smoke.sh --offline   # no API calls
+agent/phase0/smoke.sh             # a few cents of DeepSeek
+agent/run-session.sh "your task" 20 900
+```
+
+## crawl4ai scaffold: getting started
 
 ### Option A: GitHub Codespaces
 1. Push this repo to GitHub.
