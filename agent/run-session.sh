@@ -64,7 +64,9 @@ except Exception:
     print(f"session: exit {rc} after {secs}s, no JSON result (see {path[:-5]}.err)")
     sys.exit()
 print(f"session: exit {rc} after {secs}s | subtype={r.get('subtype')} "
-      f"is_error={r.get('is_error')} turns={r.get('num_turns')} -> {path}")
+      f"is_error={r.get('is_error')} turns={r.get('num_turns')}"
+      + (f" api_error={r['api_error_status']}" if r.get("api_error_status") else "")
+      + f" -> {path}")
 res = (r.get("result") or "").strip().replace("\n", " ")
 if res:
     print("result:", res[:300])

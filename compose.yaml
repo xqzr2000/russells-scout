@@ -63,6 +63,10 @@ services:
       # DeepSeek's guide uses "max"; start low for cost, tune in the Phase 0 bake-off.
       CLAUDE_CODE_EFFORT_LEVEL: ${SCOUT_EFFORT:-low}
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      # Claude Code retries failed requests 10 times by default, including a 401
+      # from DeepSeek: a bad key or empty balance then sits until the session
+      # timeout. 3 still rides out a network blip; a bad key fails in seconds.
+      CLAUDE_CODE_MAX_RETRIES: "3"
       DISABLE_AUTOUPDATER: "1"
       # ANTHROPIC_API_KEY must stay unset (auth conflict with ANTHROPIC_AUTH_TOKEN).
       # Identity for the agent's local commits (no remote, never pushed).
