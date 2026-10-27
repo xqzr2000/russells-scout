@@ -45,7 +45,7 @@ timeout --kill-after=15 "$TIMEOUT" \
   docker compose -f "$REPO_DIR/compose.yaml" --profile agent run --rm -T \
     --name "$NAME" "${extra[@]}" agent \
     claude -p "$TASK" --max-turns "$MAX_TURNS" --output-format json \
-  >"$OUT" 2>"$ERR"
+  </dev/null >"$OUT" 2>"$ERR"
 rc=$?
 secs=$(( $(date +%s) - start ))
 
