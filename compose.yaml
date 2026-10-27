@@ -38,11 +38,16 @@ services:
       - ${SCOUT_HOME:-/srv/scout}/workspace:/workspace
       - ${SCOUT_HOME:-/srv/scout}/policy:/etc/claude-code:ro
     # Claude Code never needs Anthropic here; make sure it can't reach it.
+    # Both IPv4 and IPv6, or lookups fall through to a real IPv6 address.
     extra_hosts:
-      - "api.anthropic.com:0.0.0.0"
-      - "statsig.anthropic.com:0.0.0.0"
-      - "console.anthropic.com:0.0.0.0"
-      - "claude.ai:0.0.0.0"
+      - "api.anthropic.com=0.0.0.0"
+      - "api.anthropic.com=::1"
+      - "statsig.anthropic.com=0.0.0.0"
+      - "statsig.anthropic.com=::1"
+      - "console.anthropic.com=0.0.0.0"
+      - "console.anthropic.com=::1"
+      - "claude.ai=0.0.0.0"
+      - "claude.ai=::1"
 
     # --- DeepSeek via Claude Code (plan §5.1) ---
     env_file:

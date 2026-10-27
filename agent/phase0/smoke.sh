@@ -95,7 +95,7 @@ echo "nnp=$(awk '/^NoNewPrivs/ {print $2}' /proc/self/status)"
 command -v sudo >/dev/null && echo "sudo=present" || echo "sudo=absent"
 rm -rf /workspace/smoke /workspace/.scout-logs/guard.log && mkdir -p /workspace/smoke && echo "workspace=writable" || echo "workspace=readonly"
 [ -r /etc/claude-code/managed-settings.json ] && echo "policy_readable=yes" || echo "policy_readable=no"
-echo "anthropic=$(getent hosts api.anthropic.com | awk '{print $1}')"
+echo "anthropic=$(getent ahosts api.anthropic.com | awk '{print $1}' | sort -u | tr '\n' ' ')"
 echo "claude=$(claude --version 2>/dev/null | head -1)"
 SH
 )
@@ -109,7 +109,8 @@ val() { sed -n "s/^$1=//p" <<<"$out"; }
 [[ "$(val nnp)" == 1 ]]                && pass "no-new-privileges set"        || fail "no-new-privileges set"
 [[ "$(val sudo)" == absent ]]          && pass "no sudo"                      || fail "no sudo"
 [[ "$(val workspace)" == writable ]]   && pass "workspace writable"           || fail "workspace writable"
-[[ "$(val anthropic)" == 0.0.0.0 ]]    && pass "Anthropic hosts blackholed"   || fail "Anthropic hosts blackholed" "got: $(val anthropic)"
+bad=$(tr ' ' '\n' <<<"$(val anthropic)" | grep -vxE '0\.0\.0\.0|::1|' || true)
+[[ -n "$(val anthropic)" && -z "$bad" ]] && pass "Anthropic hosts blackholed"   || fail "Anthropic hosts blackholed" "got: $(val anthropic)"
 echo "        Claude Code: $(val claude)"
 
 section "2. Guard hook rules (no API calls)"
