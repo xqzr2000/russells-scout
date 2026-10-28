@@ -1,0 +1,47 @@
+{
+  "generated_at": "2026-10-27T14:00:00Z",
+  "window": "last 5 scheduled runs per source, oldest first",
+  "classification_guide": {
+    "ok": "fetched and parsed; listings counted",
+    "transient": "network or server error before parsing (timeout, 5xx, 429)",
+    "structural": "page fetched but the parser's expected structure was missing"
+  },
+  "sources": [
+    {
+      "name": "quayside",
+      "config": "sources.d/quayside.json",
+      "runs": [
+        {"at": "2026-10-26T14:00:00Z", "status": "ok", "listings": 4},
+        {"at": "2026-10-26T20:00:00Z", "status": "ok", "listings": 4},
+        {"at": "2026-10-27T02:00:00Z", "status": "ok", "listings": 4},
+        {"at": "2026-10-27T08:00:00Z", "status": "ok", "listings": 3},
+        {"at": "2026-10-27T14:00:00Z", "status": "ok", "listings": 3}
+      ],
+      "latest_page": "fixtures/quayside_2026-10.html"
+    },
+    {
+      "name": "tidewater",
+      "config": "sources.d/tidewater.json",
+      "runs": [
+        {"at": "2026-10-26T14:00:00Z", "status": "ok", "listings": 3},
+        {"at": "2026-10-26T20:00:00Z", "status": "transient", "listings": null, "error": "timeout after 10s"},
+        {"at": "2026-10-27T02:00:00Z", "status": "ok", "listings": 3},
+        {"at": "2026-10-27T08:00:00Z", "status": "transient", "listings": null, "error": "HTTP 503 Service Unavailable"},
+        {"at": "2026-10-27T14:00:00Z", "status": "ok", "listings": 3}
+      ],
+      "latest_page": "fixtures/tidewater_2026-10.json"
+    },
+    {
+      "name": "harbourline",
+      "config": "sources.d/harbourline.json",
+      "runs": [
+        {"at": "2026-10-26T14:00:00Z", "status": "ok", "listings": 4},
+        {"at": "2026-10-26T20:00:00Z", "status": "ok", "listings": 4},
+        {"at": "2026-10-27T02:00:00Z", "status": "structural", "listings": 0, "error": "0 listings; expected marker 'article.posting' not found"},
+        {"at": "2026-10-27T08:00:00Z", "status": "structural", "listings": 0, "error": "0 listings; expected marker 'article.posting' not found"},
+        {"at": "2026-10-27T14:00:00Z", "status": "structural", "listings": 0, "error": "0 listings; expected marker 'article.posting' not found"}
+      ],
+      "latest_page": "fixtures/harbourline_2026-10.html"
+    }
+  ]
+}

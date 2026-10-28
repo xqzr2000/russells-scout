@@ -1,0 +1,8 @@
+{
+  "name": "harbourline",
+  "company": "Harbourline Logistics",
+  "url": "https://harbourline.example/careers",
+  "parser": "scout_fixture.parsers.harbourline",
+  "schedule": "every 6h",
+  "fetch": {"timeout_s": 20, "retries": 2}
+}

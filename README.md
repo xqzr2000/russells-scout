@@ -11,7 +11,7 @@ Full design: [docs/architecture-plan.md](docs/architecture-plan.md) (v3.0).
 
 | Phase | What | Status |
 |---|---|---|
-| 0 | Claude Code on DeepSeek in a hardened container on the box; locked rules; smoke tests | **setup + smoke tests in this commit** ([box setup](docs/box-setup.md)); capability tests next |
+| 0 | Claude Code on DeepSeek in a hardened container on the box; locked rules; smoke tests; capability tests | setup + smoke tests done ([results](docs/phase0-results.md)); **capability tests ready to run** ([box setup §9](docs/box-setup.md)) |
 | 1 | Scouting slice: Postgres, ATS adapters, trust scoring, dedupe (zero tokens) | |
 | 2 | Scout runtime, daily digest, WSL2 sync, backups | |
 | 3 | The agent takes over (sessions on a timer, `CLAUDE.md`, local git repo) | |
@@ -28,7 +28,7 @@ point for Phase 1.
 | `agent/Dockerfile` | Agent image: Node 22, Claude Code 2.1.310 (pinned), Python, git |
 | `agent/managed-settings/` | Locked permission rules and guard hook (installed read-only on the host) |
 | `agent/run-session.sh` | Start one headless session with a turn limit and timeout |
-| `agent/phase0/` | Smoke tests and guard-rule tests |
+| `agent/phase0/` | Smoke tests, guard-rule tests, capability tests (`capability.py`, `tasks/`) |
 | `docs/` | Architecture plan, box setup, Phase 0 results |
 | `src/scout/`, `tests/`, `Dockerfile`, `.devcontainer/` | crawl4ai scaffold (stage 1) |
 

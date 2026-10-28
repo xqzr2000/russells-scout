@@ -1,0 +1,8 @@
+{
+  "name": "tidewater",
+  "company": "Tidewater Energy Analytics",
+  "url": "https://jobs.tidewater.example/api/postings?location=vancouver",
+  "parser": "scout_fixture.parsers.tidewater",
+  "schedule": "every 6h",
+  "fetch": {"timeout_s": 10, "retries": 1}
+}

@@ -1,0 +1,25 @@
+{
+  "postings": [
+    {
+      "id": "tw-88",
+      "text": "Senior Data Analyst, Grid Operations",
+      "categories": {"location": "Vancouver, BC", "commitment": "Full-time", "team": "Analytics"},
+      "hostedUrl": "https://jobs.tidewater.example/tw-88",
+      "createdAt": 1793145600000
+    },
+    {
+      "id": "tw-91",
+      "text": "Machine Learning Engineer (Forecasting)",
+      "categories": {"location": "Vancouver, BC", "commitment": "Full-time", "team": "Data Science"},
+      "hostedUrl": "https://jobs.tidewater.example/tw-91",
+      "createdAt": 1793318400000
+    },
+    {
+      "id": "tw-95",
+      "text": "Data Science Co-op (Winter 2027)",
+      "categories": {"location": "Vancouver, BC", "commitment": "Internship", "team": "Data Science"},
+      "hostedUrl": "https://jobs.tidewater.example/tw-95",
+      "createdAt": 1793491200000
+    }
+  ]
+}

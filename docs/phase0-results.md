@@ -42,7 +42,10 @@ Fill in as you go. Plan: [architecture-plan.md](architecture-plan.md) §13.
 
 ## Capability tests (step 5)
 
-| Task | Run 1 | Run 2 | Run 3 | Turns | Cost |
+Run with `agent/phase0/capability.py repair` / `operator` (see box-setup.md §9).
+Copy the per-run lines from the screen or `/srv/scout/logs/capability.csv`.
+
+| Task | Run 1 | Run 2 | Run 3 | Turns | Est. cost / run |
 |---|---|---|---|---|---|
 | Repair | | | | | |
 | Operator | | | | | |

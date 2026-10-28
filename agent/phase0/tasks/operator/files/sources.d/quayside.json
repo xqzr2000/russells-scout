@@ -1,0 +1,8 @@
+{
+  "name": "quayside",
+  "company": "Quayside Health Data",
+  "url": "https://quayside.example/careers",
+  "parser": "scout_fixture.parsers.quayside",
+  "schedule": "every 6h",
+  "fetch": {"timeout_s": 20, "retries": 2}
+}
