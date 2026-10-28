@@ -109,7 +109,7 @@ val() { sed -n "s/^$1=//p" <<<"$out"; }
 [[ "$(val nnp)" == 1 ]]                && pass "no-new-privileges set"        || fail "no-new-privileges set"
 [[ "$(val sudo)" == absent ]]          && pass "no sudo"                      || fail "no sudo"
 [[ "$(val workspace)" == writable ]]   && pass "workspace writable"           || fail "workspace writable"
-bad=$(tr ' ' '\n' <<<"$(val anthropic)" | grep -vxE '0\.0\.0\.0|::1|' || true)
+bad=$(tr ' ' '\n' <<<"$(val anthropic)" | grep -vxE '0\.0\.0\.0|127\.0\.0\.1|::|::1|' || true)
 [[ -n "$(val anthropic)" && -z "$bad" ]] && pass "Anthropic hosts blackholed"   || fail "Anthropic hosts blackholed" "got: $(val anthropic)"
 echo "        Claude Code: $(val claude)"
 
