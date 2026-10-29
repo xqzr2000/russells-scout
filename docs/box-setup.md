@@ -1,17 +1,18 @@
 # Box setup: Claude Code on DeepSeek (Phase 0)
 
-How to get the agent container running on the Ubuntu box, working from WSL2.
-Design background: [architecture-plan.md](architecture-plan.md) §5 and §13.
+How to set up the agent container on the Ubuntu box from scratch, working from WSL2.
+Design background: [architecture-plan.md](architecture-plan.md) §5, §7 and §13.
 
 Commands marked **WSL2** run in your WSL2 terminal on Windows.
-Commands marked **box** run on the Ubuntu box (over `ssh scoutbox`).
+Commands marked **box** run on the Ubuntu box (over `ssh scoutbox`, user `shaw2012`).
 
 ## What you end up with
 
-```
-~/Documents/Project_Scout/   the code: unzipped copy of this repo (yours, plain files)
+Everything Scout uses on the box lives under `/srv/scout`:
 
-/srv/scout/                  the data (survives replacing the code with a new zip)
+```
+/srv/scout/
+├── code/                    read-only clone of the public GitHub repo (owned by shaw2012)
 ├── secrets/deepseek.env     your DeepSeek key, mode 600, never in git
 ├── policy/                  live locked rules, root-owned, mounted read-only into the agent
 │   ├── managed-settings.json
@@ -20,9 +21,16 @@ Commands marked **box** run on the Ubuntu box (over `ssh scoutbox`).
 └── logs/                    session results and smoke-test reports
 ```
 
+Only `workspace/` and `policy/` are mounted into the agent container. The agent can't see
+`code/`, `secrets/` or `logs/`; the key reaches it as an environment variable at start.
+
+**GitHub rule.** The box clones and pulls the public `russells-scout` repo read-only over
+HTTPS. It holds no GitHub credentials and never pushes. Changes reach `main` only through
+you (GitHub web UI or your own machine). The agent's own local git repo comes later, in Phase 3.
+
 ---
 
-## 0. An SSH shortcut (WSL2, once)
+## 0. SSH shortcut (WSL2, once)
 
 If you don't have one already, add this to `~/.ssh/config` in WSL2 (use your box's address and key):
 
@@ -33,57 +41,60 @@ Host scoutbox
     IdentityFile ~/.ssh/id_ed25519
 ```
 
-Check: `ssh scoutbox 'hostname; docker --version'`.
+Check: `ssh scoutbox 'hostname; whoami'`.
 
-## 1. Download the repo zip (Windows)
-
-On GitHub, open `russells-scout` → **Code → Download ZIP**.
-It lands in your Downloads folder as `russells-scout-main.zip`.
-
-## 2. Copy it to the box (WSL2)
-
-```bash
-WINUSER=$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r')
-scp "/mnt/c/Users/$WINUSER/Downloads/russells-scout-main.zip" scoutbox:/tmp/
-```
-
-## 3. Folders and code (box)
+## 1. Prerequisites (box, once)
 
 ```bash
 ssh scoutbox
 ```
 
-First time only (data folders; `sudo` asks for your password):
+```bash
+sudo apt-get update && sudo apt-get install -y git
+docker info >/dev/null && echo "docker ok"          # must work without sudo
+docker compose version                               # needs the compose plugin
+```
+
+If `docker info` needs sudo: `sudo usermod -aG docker $(id -un)`, then log out and back in.
+If `docker compose` is missing: `sudo apt-get install -y docker-compose-v2`
+(or `docker-compose-plugin` if Docker came from Docker's own apt repo).
+
+## 2. Folders (box, once)
+
+`sudo` asks for your password.
 
 ```bash
-sudo apt-get install -y unzip            # if missing
-sudo mkdir -p /srv/scout/{secrets,policy/hooks,workspace,logs}
-sudo chown $(id -un):$(id -gn) /srv/scout/secrets /srv/scout/logs
+sudo mkdir -p /srv/scout/{code,secrets,policy/hooks,workspace,logs}
+sudo chown $(id -un):$(id -gn) /srv/scout/code /srv/scout/secrets /srv/scout/logs
 sudo chmod 700 /srv/scout/secrets
+# policy/ stays root-owned (step 5 installs into it).
 # Agent's folder: owned by the container user (10001), shared with your group so you can read it.
 sudo chown 10001:$(id -gn) /srv/scout/workspace
 sudo chmod 2775 /srv/scout/workspace
+ls -la /srv/scout
 ```
 
-Unpack the code (first time; for later updates see **Updating from a new zip** below):
+Expect: `code`, `secrets` (drwx------) and `logs` owned by `shaw2012`; `policy` by `root`;
+`workspace` by `10001` with group `shaw2012` and the `s` bit (drwxrwsr-x).
+
+## 3. Code (box)
 
 ```bash
-rm -rf /tmp/scout-unzip && unzip -q /tmp/russells-scout-main.zip -d /tmp/scout-unzip
-mkdir -p ~/Documents && mv /tmp/scout-unzip/russells-scout-main ~/Documents/Project_Scout
-cd ~/Documents/Project_Scout
-chmod -R u=rwX,go=rX .
-chmod +x agent/run-session.sh agent/phase0/*.sh agent/phase0/capability.py agent/managed-settings/hooks/guard.sh
+git clone https://github.com/xqzr2000/russells-scout.git /srv/scout/code
+cd /srv/scout/code
+git log --oneline -1
+ls -l agent/run-session.sh agent/phase0/smoke.sh    # should already be executable (-rwxr-xr-x)
 ```
 
-The code folder can live anywhere; the scripts find it from their own location.
-The data folder is `/srv/scout` unless you set `SCOUT_HOME`. The agent's own git repo
-(local commits, pulled by WSL2) comes later, in Phase 3.
+Git keeps the scripts' execute bits, so no `chmod` is needed. Don't edit files here: make
+changes on GitHub and `git pull` (see **Updating** below). The scripts find the code from their
+own location and the data under `/srv/scout` (override with `SCOUT_HOME`).
 
 ## 4. DeepSeek key (box)
 
-On platform.deepseek.com: top up $10, auto top-up **off**, create an API key.
-Then, on the box, run these **one at a time** (the first line waits for you to paste
-the key once and press Enter; nothing is shown while you paste):
+On platform.deepseek.com: top up $10, auto top-up **off**, create a new API key
+(revoke any old one). Then, on the box, run these **one at a time** (the first line waits
+for you to paste the key once and press Enter; nothing is shown while you paste):
 
 ```bash
 read -rsp "DeepSeek key: " K; echo
@@ -107,7 +118,7 @@ and mounted read-only. Re-run this whenever `agent/managed-settings/` changes
 (the smoke test tells you if the installed copy is out of date).
 
 ```bash
-cd ~/Documents/Project_Scout
+cd /srv/scout/code
 sudo install -o root -g root -m 644 agent/managed-settings/managed-settings.json /srv/scout/policy/
 sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh /srv/scout/policy/hooks/
 ```
@@ -126,25 +137,14 @@ What they do:
 Both match command text, so they're a second layer. The container itself is the main
 boundary.
 
-## 6. Docker checks (box, once)
+## 6. Build the agent image (box)
 
 ```bash
-docker info >/dev/null && echo "docker ok"          # must work without sudo
-docker compose version                               # needs the compose plugin
+cd /srv/scout/code
+docker compose --profile agent build agent      # a few minutes the first time
 ```
 
-If `docker info` needs sudo: `sudo usermod -aG docker $(id -un)`, then log out and back in.
-If `docker compose` is missing: `sudo apt-get install -y docker-compose-v2`
-(or `docker-compose-plugin` if Docker came from Docker's own apt repo).
-
-## 7. Build the agent image (box)
-
-```bash
-cd ~/Documents/Project_Scout
-docker compose --profile agent build agent      # 3–5 minutes the first time
-```
-
-## 8. Smoke tests (box)
+## 7. Smoke tests (box)
 
 Free first (no API calls):
 
@@ -153,7 +153,7 @@ agent/phase0/smoke.sh --offline
 ```
 
 This checks setup, the container hardening (uid 10001, read-only root, no capabilities,
-no Docker socket, no sudo, Anthropic hosts blackholed) and 46 guard-rule cases.
+no Docker socket, no sudo, Anthropic hosts blackholed on IPv4 and IPv6) and 46 guard-rule cases.
 
 Then the full run (a few cents of DeepSeek):
 
@@ -169,14 +169,14 @@ agent/phase0/smoke.sh
 | 6. Live hook | the agent tries `echo … \| sh` and the hook blocks it |
 | 7. Invalid key | a fake key fails fast instead of hanging (stands in for an empty balance) |
 
-A report is saved to `/srv/scout/logs/smoke-<time>.txt`; each session's JSON result and
-stderr are in `/srv/scout/logs/session-*.json` / `.err`.
+Expected: 26/26. A report is saved to `/srv/scout/logs/smoke-<time>.txt`; each session's JSON
+result and stderr are in `/srv/scout/logs/session-*.json` / `.err`.
 
 Test 6 can come back "inconclusive" if the model declines to run the command at all.
 Run it again; if it keeps declining, that's fine for today (the offline guard tests
 still prove the rules), but note it.
 
-## 9. Capability tests (Phase 0 step 5, box)
+## 8. Capability tests (Phase 0 step 5, box)
 
 Two realistic tasks, 3 runs each, scored automatically
 (`agent/phase0/capability.py`, tasks in `agent/phase0/tasks/`):
@@ -192,6 +192,7 @@ Two realistic tasks, 3 runs each, scored automatically
 First, free checks that the scoring works (no API calls):
 
 ```bash
+cd /srv/scout/code
 agent/phase0/capability.py repair --runs 1 --self-test          # expect PASS
 agent/phase0/capability.py repair --runs 1 --self-test noop     # expect FAIL (tests_pass, holdout_pass)
 agent/phase0/capability.py operator --runs 1 --self-test        # expect PASS
@@ -209,58 +210,68 @@ to `/srv/scout/logs/capability.csv`; full transcripts and scores to `/srv/scout/
 the agent's work stays in `/srv/scout/workspace/phase0/<run>/` (a git repo: `git -C … log -p`).
 Go/no-go: at least 2 of 3 runs pass per task.
 
+While a run is going, `docker stats` in a second SSH window shows the container's peak memory
+(record it in [phase0-results.md](phase0-results.md)).
+
 Bake-off later: `--effort high`, or `--runs 1` for a quick look.
 
-## 10. Try a session yourself (box)
+## 9. Try a session yourself (box)
 
 ```bash
+cd /srv/scout/code
 agent/run-session.sh "List the files in /workspace and describe them in two sentences." 5 120
 ```
 
 Arguments: task, max turns (default 20), timeout in seconds (default 900).
 Effort level defaults to `low`; try `SCOUT_EFFORT=high agent/run-session.sh …` to compare.
 
-## 11. Check the cost (browser)
+## 10. Check the cost (browser)
 
-After the smoke run, open the DeepSeek console's usage page and note what the run cost.
+After the runs, open the DeepSeek console's usage page and note what they cost.
 That's Phase 0 step 7 — used once to set turn limits and how often sessions run.
 Write it down in [phase0-results.md](phase0-results.md).
 
-## 12. Get the logs back to WSL2 (WSL2)
+## 11. Get the logs back to WSL2 (WSL2)
 
 ```bash
-mkdir -p ~/scout-logs && scp 'scoutbox:/srv/scout/logs/*' ~/scout-logs/
+mkdir -p ~/scout-logs && scp -r 'scoutbox:/srv/scout/logs/*' ~/scout-logs/
 ```
 
 Or open the box in **VS Code → Remote-SSH → scoutbox** and browse `/srv/scout/`.
 
 ---
 
-## Updating from a new zip
+## Updating
 
-When the main repo has changed (for example after fixes on GitHub):
-
-1. **Windows:** GitHub → Code → Download ZIP.
-2. **WSL2:** copy it over (as in step 2).
-3. **Box:** keep the old code as a backup, unpack the new one, fix permissions,
-   re-install the locked rules, rebuild, re-test. Your key, workspace and logs in
-   `/srv/scout` are not touched.
+When `main` on GitHub has changed (you edit it through the web UI or from your own machine):
 
 ```bash
-cd ~/Documents
-rm -rf /tmp/scout-unzip && unzip -q /tmp/russells-scout-main.zip -d /tmp/scout-unzip
-rm -rf Project_Scout.old && mv Project_Scout Project_Scout.old
-mv /tmp/scout-unzip/russells-scout-main Project_Scout
-cd Project_Scout
-chmod -R u=rwX,go=rX .
-chmod +x agent/run-session.sh agent/phase0/*.sh agent/phase0/capability.py agent/managed-settings/hooks/guard.sh
+cd /srv/scout/code
+git status --short                # should print nothing; the box copy is never edited
+git pull --ff-only
 sudo install -o root -g root -m 644 agent/managed-settings/managed-settings.json /srv/scout/policy/
 sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh /srv/scout/policy/hooks/
 docker compose --profile agent build agent
 agent/phase0/smoke.sh --offline
 ```
 
-If something breaks, `Project_Scout.old` is the previous version.
+Your key, workspace and logs in `/srv/scout` are not touched. To go back if something breaks:
+`git log --oneline` then `git checkout <commit>` (and `git checkout main` to return).
+
+Results you want on GitHub (for example the numbers for `phase0-results.md`) go there by hand
+through the web UI; nothing on the box is ever pushed.
+
+## Starting over
+
+To wipe Scout from the box and repeat this guide from step 2:
+
+```bash
+docker ps -a --filter name=scout -q | xargs -r docker rm -f
+docker image rm scout-agent:dev
+sudo rm -rf /srv/scout
+```
+
+Revoke the DeepSeek key on the console if you're not reusing it.
 
 ## Troubleshooting
 
@@ -270,12 +281,15 @@ If something breaks, `Project_Scout.old` is the previous version.
 | "Not logged in" / "Please run /login" | Key not reaching the container. Check the file has `ANTHROPIC_AUTH_TOKEN=sk-…` with no quotes or spaces. |
 | 401 / authentication error | Wrong or revoked key. |
 | 402 / insufficient balance | Balance empty: top up, or wait for next month. |
+| `git clone` asks for a username | The repo isn't public, or the URL is mistyped. The box never stores GitHub credentials. |
+| `git pull` refuses (local changes / not fast-forward) | Something edited the box copy. `git stash` or `git checkout -- .`, then pull again. |
+| `Permission denied (publickey)` on `git clone` | You used the SSH URL; use the `https://` one. |
 | Session runs until the timeout | Check the newest `/srv/scout/logs/session-*.err`. Network: `docker compose --profile agent run --rm agent curl -sI https://api.deepseek.com`. Claude Code retries failed requests (capped at 3 by `CLAUDE_CODE_MAX_RETRIES` in `compose.yaml`). |
 | A session never returns, even after the timeout | Something is reading the terminal. `run-session.sh` feeds sessions `</dev/null`; do the same if you run `docker compose run … claude -p` by hand under `timeout`. |
 | `[claude-code:unrecognized_model] deepseek-flash` on stderr | Harmless: Claude Code doesn't know DeepSeek's model names. |
 | "Managed settings document could not be parsed" | `/srv/scout/policy/managed-settings.json` isn't valid JSON; re-install from the repo (step 5). |
 | `Permission denied` in `/workspace` | `sudo chown 10001 /srv/scout/workspace` |
-| Can't read agent files on the host | They're owned by uid 10001; your group can read them if step 3 was followed. Otherwise `sudo ls /srv/scout/workspace`. |
+| Can't read agent files on the host | They're owned by uid 10001; your group can read them if step 2 was followed. Otherwise `sudo ls /srv/scout/workspace`. |
 
 ## Not done yet (later phases)
 

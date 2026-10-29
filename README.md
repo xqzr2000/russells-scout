@@ -11,7 +11,7 @@ Full design: [docs/architecture-plan.md](docs/architecture-plan.md) (v3.0).
 
 | Phase | What | Status |
 |---|---|---|
-| 0 | Claude Code on DeepSeek in a hardened container on the box; locked rules; smoke tests; capability tests | setup + smoke tests done ([results](docs/phase0-results.md)); **capability tests ready to run** ([box setup §9](docs/box-setup.md)) |
+| 0 | Claude Code on DeepSeek in a hardened container on the box; locked rules; smoke tests; capability tests | **fresh box install in progress** (2026-10-28, [box setup](docs/box-setup.md)); first install's findings in [results](docs/phase0-results.md) |
 | 1 | Scouting slice: Postgres, ATS adapters, trust scoring, dedupe (zero tokens) | |
 | 2 | Scout runtime, daily digest, WSL2 sync, backups | |
 | 3 | The agent takes over (sessions on a timer, `CLAUDE.md`, local git repo) | |
@@ -34,9 +34,11 @@ point for Phase 1.
 
 ## Agent on the Ubuntu box
 
-Step by step from WSL2: [docs/box-setup.md](docs/box-setup.md). In short:
+Step by step from WSL2: [docs/box-setup.md](docs/box-setup.md). The box keeps a read-only
+clone of this repo in `/srv/scout/code` and never pushes. In short:
 
 ```bash
+cd /srv/scout/code
 docker compose --profile agent build agent
 agent/phase0/smoke.sh --offline   # no API calls
 agent/phase0/smoke.sh             # a few cents of DeepSeek
