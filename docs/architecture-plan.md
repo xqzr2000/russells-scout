@@ -1,9 +1,9 @@
 # Project Scout: Autonomous Job-Scouting System
 ## Architecture and Implementation Plan — v3.0
 
-**Status:** Revised design (v3.0, 2026-10-26), supersedes v2.2
-**Repository:** `russells-scout` (main repo on GitHub; the box never connects to GitHub)
-**Host:** Dedicated headless Ubuntu 26.04 machine, amd64, 10 GB RAM, Docker installed; administered over SSH from WSL2 (working)
+**Status:** Revised design (v3.1, 2026-10-28), supersedes v3.0 and v2.2
+**Repository:** `russells-scout` (public main repo on GitHub; the box clones and pulls it read-only, holds no GitHub credentials and never pushes)
+**Host:** Dedicated headless Ubuntu 26.04 machine (2012 Mac mini), amd64, 10 GB RAM, Docker installed; administered over SSH from WSL2 as `shaw2012`. Everything Scout uses lives under `/srv/scout` (code in `/srv/scout/code`)
 **Language:** Python (scouting code); Node (Claude Code runtime)
 **Database:** PostgreSQL (same host). The database is the system's output.
 **Agent:** Claude Code, running headless in a hardened container, using the DeepSeek API (`deepseek-flash`) through DeepSeek's Anthropic-compatible endpoint. No Claude account.
@@ -20,8 +20,8 @@
 | LLM gateway | Local gateway holding keys and budgets | Removed. Claude Code calls DeepSeek directly |
 | Groq fallback | Optional fallback via gateway | Dropped for now (open item) |
 | Web access | Domain allowlists per source | Open web access with a small blast radius, plus site-safety rules and per-listing trust scoring |
-| Code flow | Autonomous gated deploys from a repo clone | Install from a zip of the main repo; agent commits to a local git repo with no remote; WSL2 pulls automatically; you promote milestones to GitHub by hand |
-| GitHub | Box pulls the repo | Box holds no GitHub credentials at all |
+| Code flow | Autonomous gated deploys from a repo clone | Box installs and updates from a read-only `git clone` of the public main repo (v3.1; v3.0 used a zip); agent commits to a local git repo with no remote; WSL2 pulls automatically; you promote milestones to GitHub by hand |
+| GitHub | Box pulls the repo | Box pulls the public repo read-only; holds no GitHub credentials and never pushes |
 | Output | Queue table for a remote reviewer agent | Postgres is the output. Reviewer agent and queue removed for now; read-only role and human-friendly views |
 | Disaster recovery | DB backups on the box | Main repo (milestones) + WSL2 mirror (recent work) + DB backups pulled to WSL2; job decisions live in your email |
 | Scouting tools | Crawl4AI primary, Firecrawl/Tavily agent-only | Unchanged for now, **deferred for later discussion** |
@@ -46,7 +46,7 @@ You are the only link between the box and GitHub. WSL2 pulls the agent's work ev
 3. The agent is powerful inside its container and powerless outside it.
 4. The agent's guardrails live in files it can read but not edit.
 5. The agent holds only credentials whose loss is tolerable (at most the remaining DeepSeek balance and the scout database).
-6. The box never connects to GitHub or to your Windows machine. Connections only go from WSL2 to the box.
+6. The box never pushes to GitHub and holds no GitHub credentials; its only GitHub traffic is a read-only pull of the public main repo, started by you. It never connects to your Windows machine. Management connections only go from WSL2 to the box.
 7. Postgres is the output. Whoever reads it next is a separate concern.
 8. Suspicious listings are flagged with reasons, never silently dropped.
 9. The daily email digest is the only routine human touchpoint.
@@ -164,7 +164,7 @@ flowchart TB
     YOU -->|SSH tunnel, read-only role| PG
 ```
 
-Connections only go **into** the box from WSL2. The box has no path to Windows or GitHub.
+Management connections only go **into** the box from WSL2. The box has no path to Windows and no write path to GitHub (it only pulls the public repo, when you run `git pull`).
 
 ### Responsibility boundaries
 
@@ -281,11 +281,17 @@ Each listing gets a trust score and the reasons for it, computed by plain code w
 
 ### 7.1 Install
 
-1. Download a zip of the main `russells-scout` repo on Windows.
-2. Copy it to the box over SSH and unpack it.
-3. Initialise it as a local git repo (no remote) owned by the agent's uid, group-readable by `russell`.
-4. Add the secrets file (`/srv/scout/secrets/…`, never in git).
+Step by step: [box-setup.md](box-setup.md).
+
+1. Create `/srv/scout/{code,secrets,policy,workspace,logs}` with the owners in box-setup.md §2.
+2. `git clone` the public main repo over HTTPS into `/srv/scout/code` (owned by `shaw2012`, never edited on the box, no credentials).
+3. Add the secrets file (`/srv/scout/secrets/deepseek.env`, mode 600, never in git).
+4. Install the locked rules into `/srv/scout/policy/` (root-owned, mounted read-only).
 5. Build the images on the box (`docker compose build`); versions pinned in the repo so a rebuild elsewhere matches.
+
+Updates: you change `main` on GitHub (web UI or your own machine), then `git pull --ff-only` on the box, re-install the locked rules, rebuild and re-run the offline smoke test. Nothing on the box is ever pushed.
+
+The agent's own work repo (Phase 3) is separate: a local git repo with no remote inside `/srv/scout/workspace`, owned by the agent's uid and group-readable by `shaw2012`.
 
 ### 7.2 Agent commits
 
@@ -307,7 +313,7 @@ At important stages you promote the WSL2 copy to the main repo yourself. No auto
 
 | Lost | Recover from |
 |---|---|
-| Box | Main repo or WSL2 mirror + secrets file → new box or AWS |
+| Box | Main repo (`git clone`) or WSL2 mirror + secrets file → new box or AWS |
 | Box and Windows PC | Main repo at the last milestone; database re-scraped |
 | Job decisions | Your email history with employers |
 
@@ -528,7 +534,7 @@ Restore test from WSL2 backups, rebuild-on-new-box test, review of flagged listi
 | VS Code + Remote-SSH | Browsing files and logs on the box |
 | Ubuntu box | Phase 0, then production |
 
-SSH: key-only login for `russell`, LAN-only firewall, fixed address. A separate restricted key for the sync job. Everything on the box binds to localhost; reach it through SSH tunnels.
+SSH: key-only login for `shaw2012`, LAN-only firewall, fixed address. A separate restricted key for the sync job. Everything on the box binds to localhost; reach it through SSH tunnels.
 
 ---
 
@@ -552,7 +558,14 @@ SSH: key-only login for `russell`, LAN-only firewall, fixed address. A separate 
 - Budget: $10/month prepaid; no spend tracking; token-sensitive design.
 - Container: hardened, non-root, no Docker socket, locked settings.
 - Web: open access, small blast radius, site-safety rules, trust scoring.
-- GitHub: box never connects; zip install; local commits; automated WSL2 pull every 6h; manual milestones to main repo.
+- GitHub: box never connects; zip install; local commits; automated WSL2 pull every 6h; manual milestones to main repo. *(Install method revised 2026-10-28, below.)*
+
+### Decisions log (2026-10-28) — fresh box deployment
+
+- Box wiped and set up again from scratch (old `/srv`, code folder, Docker images and old DeepSeek key removed; new key created).
+- Layout: everything under `/srv/scout`; code in `/srv/scout/code` instead of `~/Documents/Project_Scout`.
+- Install and updates: read-only `git clone` / `git pull --ff-only` of the public repo replaces the zip. The box holds no GitHub credentials and never pushes; changes reach `main` only through you via the GitHub web UI.
+- Box login is `shaw2012` (the plan previously said `russell`).
 - Output: Postgres only; no reviewer agent or queue for now.
 - Recovery: main repo + WSL2 mirror; job decisions in email.
 - Digest: includes sync status and milestone nudge.
