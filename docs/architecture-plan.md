@@ -1,7 +1,7 @@
 # Project Scout: Autonomous Job-Scouting System
-## Architecture and Implementation Plan — v3.0
+## Architecture and Implementation Plan — v3.2
 
-**Status:** Revised design (v3.1, 2026-10-28), supersedes v3.0 and v2.2
+**Status:** Revised design (v3.2, 2026-10-30: WorkBC-first scouting; v3.1, 2026-10-28: fresh box deployment), supersedes v3.0 and v2.2
 **Repository:** `russells-scout` (public main repo on GitHub; the box clones and pulls it read-only, holds no GitHub credentials and never pushes)
 **Host:** Dedicated headless Ubuntu 26.04 machine (2012 Mac mini), amd64, 10 GB RAM, Docker installed; administered over SSH from WSL2 as `shaw2012`. Everything Scout uses lives under `/srv/scout` (code in `/srv/scout/code`)
 **Language:** Python (scouting code); Node (Claude Code runtime)
@@ -24,7 +24,7 @@
 | GitHub | Box pulls the repo | Box pulls the public repo read-only; holds no GitHub credentials and never pushes |
 | Output | Queue table for a remote reviewer agent | Postgres is the output. Reviewer agent and queue removed for now; read-only role and human-friendly views |
 | Disaster recovery | DB backups on the box | Main repo (milestones) + WSL2 mirror (recent work) + DB backups pulled to WSL2; job decisions live in your email |
-| Scouting tools | Crawl4AI primary, Firecrawl/Tavily agent-only | Unchanged for now, **deferred for later discussion** |
+| Scouting tools | Crawl4AI primary, Firecrawl/Tavily agent-only | **v3.2:** WorkBC job board search is the main source; employer ATS APIs add detail; Crawl4AI kept for custom career pages later; Firecrawl/Tavily still deferred |
 
 ---
 
@@ -139,7 +139,7 @@ flowchart TB
         end
         subgraph RT[Scout runtime container — always on]
             TIM[Scheduler]
-            W[Scouting scripts\nCrawl4AI + ATS adapters]
+            W[Scouting scripts\nWorkBC search + ATS adapters]
             TIM --> W
         end
         PG[(PostgreSQL)]
@@ -154,7 +154,7 @@ flowchart TB
     end
 
     DS[(DeepSeek API)]
-    WEB[(Open web: career pages, ATS boards)]
+    WEB[(Open web: WorkBC, ATS boards, career pages)]
     CC --> DS
     CC --> WEB
     W --> WEB
@@ -261,6 +261,7 @@ Each listing gets a trust score and the reasons for it, computed by plain code w
 
 **Trust signals**
 - Posted on the employer's own careers page or a major ATS board (Greenhouse, Lever, Ashby, Workday, SmartRecruiters) or Canada's Job Bank.
+- Listed on WorkBC (the B.C. government job board) with a link to the employer's own site or ATS.
 - Verified: reachable from the company's real website.
 
 **Red flags**
@@ -325,13 +326,14 @@ The database only needs to be rebuildable, not irreplaceable.
 
 Scout's job ends when a clean, trustworthy record is in Postgres. You check it directly now; a separate agent may read it later.
 
-### Tables (carried from v2.2, adjusted)
+### Tables (v3.2; column-level sketch in [phase1-plan.md](phase1-plan.md) §4)
 
 | Table | Purpose |
 |---|---|
-| `sources` | Source registry plus health: `status`, `last_success_at`, `consecutive_failures` |
-| `jobs` | Canonical listings, `relevant`, `matched_rules`, `trust_score`, `trust_reasons`, `status`, `first_seen_at`, `last_seen_at`, `missed_runs` |
-| `job_events` | Append-only history: new, changed, removed |
+| `sources` | Source registry plus health: the WorkBC search, and one row per ATS board used for enrichment. `status`, `last_success_at`, `consecutive_failures` |
+| `employers` | One row per employer: display name, normalized name, ATS type and board name (worked out from posting links), first/last seen |
+| `postings` | One row per listing: WorkBC job ID, title, employer, city, `area`, `workplace`, dates, salary text, jump URL, ATS type and posting ID, `matched_terms`, `match_quality`, `is_job_bank`, `dup_group_id`, `trust_score`, `trust_reasons`, `status`, `first_seen_at`, `last_seen_at`, `missed_runs` |
+| `posting_events` | Append-only history: new, changed, removed, reappeared |
 | `scout_runs` | One row per run |
 | `run_source_results` | Per-source outcome per run: classification (ok, empty, structural, transient, restricted) |
 | `agent_sessions` | Session start/end, task, outcome, turns used (no cost tracking) |
@@ -340,7 +342,8 @@ Removed from v2.2: `queue_tasks`, `agent_usage`, `deployments` (pending the rout
 
 ### Views for humans
 
-- `v_new_relevant_7d` — new relevant jobs in the last 7 days
+- `v_new_relevant_7d` — new relevant jobs in the last 7 days (Metro Vancouver or remote, title matches a search term as a phrase)
+- `v_review` — looser title matches, to check by eye and tune the terms
 - `v_suspicious` — listings with red flags and their reasons
 - `v_source_health` — last success and failure class per source
 
@@ -348,8 +351,8 @@ Removed from v2.2: `queue_tasks`, `agent_usage`, `deployments` (pending the rout
 
 | Role | Access |
 |---|---|
-| `scout_ingest` | Insert/update jobs, events, runs (scout runtime) |
-| `scout_agent` | Read all; write sources and job data; no DDL, no role management (agent) |
+| `scout_ingest` | Insert/update postings, employers, events, runs (scout runtime) |
+| `scout_agent` | Read all; write sources and posting data; no DDL, no role management (agent) |
 | `scout_reader` | Read-only (you now, a future agent later) |
 | `scout_migrate` | Schema changes; human only |
 
@@ -359,20 +362,51 @@ SSH tunnel from WSL2 (`ssh -L 5432:localhost:5432 …`) and a normal tool such a
 
 ---
 
-## 9. Scouting Pipeline (carried from v2.2 — under review)
+## 9. Scouting Pipeline (v3.2 — WorkBC first)
 
-Scouting tools are deferred for later discussion. The v2.2 design stands as the working draft:
+Probe results and the detailed Phase 1 design: [phase1-plan.md](phase1-plan.md).
 
-- **Adapters, preferred order:** ATS JSON APIs (Greenhouse, Lever, Ashby, SmartRecruiters) → JSON-LD `JobPosting` → static HTML via Crawl4AI → dynamic HTML via Crawl4AI → Playwright scripts.
-- **Fetching:** per-domain rate limits, timeouts, bounded retries, identifiable user agent, robots respected.
-- **Normalization:** canonical fields as in v2.2 §7.3.
-- **Relevance filter:** driven by the user-owned `search.json` (location, keywords, listing age). Search criteria to be discussed.
-- **Trust scoring:** §6.2.
-- **Dedup:** source listing ID → canonical URL → conservative cross-source fingerprint.
-- **Change detection:** content hash excluding volatile text.
-- **Removal safety:** a listing is `removed` only after missing from 3 consecutive complete, successful runs.
-- **Empty vs broken:** markers decide whether zero listings is a success or a structural failure.
-- **Firecrawl:** agent-only fallback for investigating hard pages; never in scheduled runs. **Tavily:** source discovery. Both under review.
+**Main source: the WorkBC job board.** The B.C. government job board combines Canada's Job Bank
+with postings collected from employers' own career sites. Its search page calls a JSON API
+(`POST api/Search/JobSearch`, open-source code in `bcgov/workbc-jb`). Each external posting carries
+a link to the employer's own site or ATS, so no browser automation is needed to find jobs.
+A full sweep of all search terms takes about a dozen requests (176 postings on 2026-10-30).
+
+1. **Sweep:** each search term from `config/search.json`, matched against job titles, all of B.C.,
+   newest first, every page. One request per second, identifiable user agent, at most twice a day.
+2. **Merge:** one row per WorkBC job; the terms that found it go into `matched_terms`.
+3. **Classify area** in our own code (WorkBC's remote filter misses most postings):
+   `metro` (a Metro Vancouver municipality), `remote` (virtual/remote flag, city given only as
+   "British Columbia", or "remote" in the title or link), `other_bc`, `outside`.
+4. **Title match quality:** `exact` when a search term appears as a phrase in the title, otherwise
+   `loose`. Nothing is dropped; loose matches go to a review view.
+5. **Employer and ATS:** read the ATS type and board name from each posting's link (Ashby,
+   Greenhouse, Lever, Workday, SmartRecruiters, Workable, Oracle, others → `custom`). Job Bank
+   postings have no employer link and are flagged `is_job_bank`.
+6. **Enrichment from the employer's ATS** where it has a public API (Phase 1: Ashby, Greenhouse,
+   Lever): one request per board gives descriptions, pay ranges, remote flags, and other matching
+   roles WorkBC doesn't list. Workday and custom career sites are left for the agent (Phase 3).
+7. **Duplicates:** same WorkBC job → one row; same canonical link → one row; probable duplicates
+   (same normalized employer and title, or a shared requisition ID in the links) share a
+   `dup_group_id`. Flagged, never deleted.
+8. **Trust scoring:** §6.2.
+9. **Change detection:** content hash of the fields that matter (title, employer, city, salary text).
+10. **Removal safety:** a posting is `removed` only after missing from 3 consecutive sweeps in which
+    every term succeeded. WorkBC's expiry date for external postings is always 90 days after posting,
+    so it isn't used to decide that a job has closed.
+11. **Empty vs broken:** a term returning zero is normal; every term returning zero, or a response
+    without the expected fields, is a structural failure (§11).
+
+**Use of WorkBC data:** postings are kept in the private database for Russell's own job search and
+are never republished. Because the repo is public, test fixtures copy the response format with
+made-up data; real responses stay on the box. The WorkBC search API is undocumented and may
+change; a break is a repair task for the agent.
+
+**Fetching (all sources):** per-host rate limits, timeouts, bounded retries, an identifiable user
+agent, robots.txt and site terms respected for web pages.
+
+**Later:** wider matching for similar jobs that the title list misses (Phase 4); Crawl4AI for custom
+career pages; Firecrawl and Tavily remain deferred.
 
 ---
 
@@ -417,13 +451,16 @@ russells-scout/
 ├── CLAUDE.md                 # agent goal and rules (guidance, editable by agent)
 ├── compose.yaml              # scout runtime, agent, postgres
 ├── pyproject.toml
-├── migrations/               # human-applied schema changes
+├── migrations/               # human-applied schema changes (SQL)
 ├── config/
-│   ├── search.example.json   # user-owned search criteria
+│   ├── search.json           # user-owned search terms and area (Metro Vancouver + remote)
 │   ├── sources.d/            # agent-managed source registry
 │   └── schedule.example.json # agent-managed cadence (limits TBD)
-├── scout/                    # scouting code (agent-maintained)
-│   ├── adapters/  fetchers/  parsers/  scripts/  pipeline/  trust/  db/
+├── src/scout/                # scouting code (agent-maintained); package already exists
+│   ├── sources/workbc.py     # WorkBC search sweep
+│   ├── ats/                  # link classifier + Ashby, Greenhouse, Lever enrichment
+│   ├── pipeline/             # area, title match, employers, duplicates, change detection
+│   ├── trust/  db/
 ├── agent/
 │   ├── Dockerfile            # Node + pinned Claude Code + Python + test tools
 │   ├── managed-settings/     # permissions + hooks, mounted read-only (agent can't change the live copy)
@@ -433,7 +470,7 @@ russells-scout/
 │   ├── supervisor/  mailer/  backup/
 │   └── wsl-sync/             # WSL2 sync script + Task Scheduler setup + authorized_keys restriction
 └── tests/
-    ├── unit/  fixtures/  regression/
+    ├── unit/  fixtures/  regression/    # fixtures: synthetic WorkBC and ATS responses
     └── guardrails/           # container escape, secrets, hook tests
 ```
 
@@ -445,7 +482,7 @@ The live managed-settings file, `ops/` units and secrets are installed on the ho
 
 ### Phase 0 — Prove Claude Code on DeepSeek, on the box
 
-Step 1 (SSH from WSL2) is **done**.
+**Done: GO (2026-10-29).** 26/26 smoke tests; capability tests 3/3 on repair and operator; `deepseek-flash` at low effort. Details: [phase0-results.md](phase0-results.md).
 
 1. **Box prep:** folders for the agent workspace and results (uid 10001); DeepSeek account, $10 top-up, auto top-up off; key in a mode-600 env file.
 2. **Agent image:** Node, pinned Claude Code, Python, test tools; hardened as in §5.4.
@@ -466,7 +503,14 @@ The old OpenHands spike code in `agent/spike/` is retired.
 
 ### Phase 1 — Scouting slice (zero tokens)
 
-Postgres, migrations, roles, views; two ATS adapters plus one JSON-LD source; normalize, filter, trust scoring, dedupe, change detection; fixtures and regression tests. Exit: 3–5 Vancouver sources end-to-end, reruns idempotent.
+Build plan: [phase1-plan.md](phase1-plan.md). Postgres, migrations, roles, views; WorkBC sweep;
+area and title-match rules; employer and ATS detection from links; Ashby, Greenhouse and Lever
+enrichment; duplicates, trust scoring, change detection, removal safety; fixtures and regression
+tests. Run by hand (`scout sweep`); scheduling comes in Phase 2.
+
+Exit: one command sweeps WorkBC and enriches from the three ATS types into Postgres; a rerun creates
+no duplicates; one failing term or board doesn't stop the others; a failed sweep marks nothing
+removed; no LLM calls.
 
 ### Phase 2 — Runtime, digest, sync, backups
 
@@ -474,11 +518,11 @@ Scout runtime container with scheduler; supervisor and mailer; DB backups; WSL2 
 
 ### Phase 3 — The agent takes over
 
-Agent sessions on the host timer; `CLAUDE.md`; the routine (to be designed); how agent changes reach the runtime. Exit: the agent adds, tunes and repairs sources inside its rules and the monthly budget.
+Agent sessions on the host timer; `CLAUDE.md`; the routine (to be designed); how agent changes reach the runtime. First real tasks: a Workday enrichment adapter (the largest single ATS group, about 21% of postings in the probe), then the largest custom career sites. Exit: the agent adds, tunes and repairs sources inside its rules and the monthly budget.
 
 ### Phase 4 — Discovery and coverage
 
-New sources found and investigated by the agent; scouting-tool decisions applied (Firecrawl/Tavily or alternatives).
+New sources found and investigated by the agent; wider matching for similar jobs that the title list misses; scouting-tool decisions applied (Firecrawl/Tavily or alternatives).
 
 ### Phase 5 — Long-run hardening
 
@@ -541,16 +585,17 @@ SSH: key-only login for `shaw2012`, LAN-only firewall, fixed address. A separate
 ## 17. Open Items and Next Discussions
 
 **Next discussions, in suggested order**
-1. **The agent's routine:** when sessions run, what each session does, how the agent picks its work, turn limits.
+1. **The agent's routine:** when sessions run, what each session does, how the agent picks its work, turn limits (Phase 0 suggests starting at 1–2 sessions a day).
 2. **How agent changes go live:** tests, canary, rollback between the agent's repo and the scout runtime.
-3. **Search criteria:** final `search.json` values.
-4. **Scouting tools:** Crawl4AI, Firecrawl, Tavily (deferred).
+3. **Wider matching:** similar jobs the title list misses (Phase 4).
+4. **Scouting tools:** Firecrawl, Tavily (deferred); Crawl4AI for custom career pages.
 
 **Other open items**
 - Groq or other fallback provider: would need an Anthropic-compatible route; dropped for now.
 - SMTP provider for the digest.
-- Initial list of Vancouver employers and their ATS.
-- Exact managed-settings path and hook set (Phase 0).
+- ~~Initial list of Vancouver employers and their ATS~~ — resolved 2026-10-30: employers are discovered from WorkBC postings.
+- ~~Search criteria~~ — resolved 2026-10-30: initial terms and area in [phase1-plan.md](phase1-plan.md) §2.
+- ~~Exact managed-settings path and hook set~~ — resolved in Phase 0: `/etc/claude-code/managed-settings.json` in the container, from `/srv/scout/policy/` on the host.
 
 ### Decisions log (2026-10-25 → 26)
 
@@ -569,6 +614,21 @@ SSH: key-only login for `shaw2012`, LAN-only firewall, fixed address. A separate
 - Output: Postgres only; no reviewer agent or queue for now.
 - Recovery: main repo + WSL2 mirror; job decisions in email.
 - Digest: includes sync status and milestone nudge.
+
+### Decisions log (2026-10-30) — Phase 0 closed, WorkBC-first scouting
+
+- Phase 0: GO. `deepseek-flash`, effort low.
+- Main source: WorkBC job board search API (JSON), title-only search for the agreed terms across
+  B.C.; area and remote classification in our own code.
+- Area: Metro Vancouver, plus remote roles wherever they're based. Other B.C. postings kept but
+  marked out of area.
+- Job Bank postings kept, flagged as having no employer site.
+- Search stays broad (all title words must match, in any order); each posting is marked `exact` or
+  `loose`, and loose matches go to a review view instead of being dropped.
+- Employers are discovered from WorkBC posting links, not hand-listed.
+- Enrichment in Phase 1: Ashby, Greenhouse, Lever (public APIs). Workday and custom sites go to
+  the agent in Phase 3.
+- WorkBC data is for private use only; never republished.
 
 ### First milestone
 
