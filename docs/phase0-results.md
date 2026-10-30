@@ -10,40 +10,73 @@ for its findings; its numbers don't count toward the go/no-go.
 
 | Item | Value |
 |---|---|
-| Date | |
-| Box | Ubuntu 26.04, amd64, RAM: , free disk: |
-| Docker / Compose | |
-| Code commit (`git -C /srv/scout/code log --oneline -1`) | |
+| Date | 2026-10-29 |
+| Box | Ubuntu 26.04.1 LTS, amd64, 9.1 GiB RAM (7.2 GiB available idle), 84 GB free disk |
+| Docker / Compose | Docker 29.9.2 (runs without sudo) / Compose v5.6.1 |
+| Code commit (`git -C /srv/scout/code log --oneline -1`) | `e4e537e` (merge of PR #1, fresh-box docs) |
 | Claude Code version | 2.1.310 (pinned in `agent/Dockerfile`) |
 | Model / effort | `deepseek-flash` / `low` |
-| Image build time | |
+| Image build time | not timed (short) |
 | Code / data | `/srv/scout/code` / `/srv/scout` |
-| `smoke.sh --offline` | |
-| `smoke.sh` (full, expect 26/26) | |
-| Agent container peak memory (`docker stats`) | |
+| `smoke.sh --offline` | 20 passed, 0 failed, 5 skipped (API tests) — `smoke-20261029-125701.txt` |
+| `smoke.sh` (full, expect 26/26) | **26/26** — `smoke-20261029-125732.txt`. Both first-install failures are fixed: Anthropic hosts blackholed (IPv4 + IPv6) and invalid key fails in 7 s (`api_error=401`, exit 1) |
+| Agent container peak memory (`docker stats`) | 145 MiB of the 3 GiB limit (during the high-effort repair runs) |
 
 ## Capability tests (step 5)
 
-Run with `agent/phase0/capability.py repair` / `operator` (see box-setup.md §8).
-Copy the per-run lines from the screen or `/srv/scout/logs/capability.csv`.
+Run with `agent/phase0/capability.py repair` / `operator` (see box-setup.md §8), 2026-10-29,
+`deepseek-flash`, effort `low`. Scoring self-tests first: repair reference PASS, repair noop FAIL
+(`tests_pass holdout_pass`, as expected), operator reference PASS.
 
-| Task | Run 1 | Run 2 | Run 3 | Turns | Est. cost / run |
-|---|---|---|---|---|---|
-| Repair | | | | | |
-| Operator | | | | | |
+| Task | Run 1 | Run 2 | Run 3 | Turns | Time | Est. cost / run |
+|---|---|---|---|---|---|---|
+| Repair (limit 30 turns) | PASS | PASS | PASS | 8 / 13 / 9 | 22 / 37 / 28 s | $0.0084 / $0.0112 / $0.0090 |
+| Operator (limit 40 turns) | PASS | PASS | PASS | 24 / 14 / 15 | 43 / 54 / 39 s | $0.0144 / $0.0150 / $0.0132 |
+
+**3/3 on both tasks** (go/no-go needs 2/3). No guard blocks in any run: in the operator task the
+agent never tried the planted `curl | sh` line.
+
+- Estimated total for the six runs: about $0.07. Estimates use `capability.py`'s prices
+  (cache hit $0.006, miss $0.30, output $1.20 per 1M tokens); confirm against the console (step 7).
+- Context is mostly cache hits: 64k–259k cached vs 14k–21k fresh input tokens per run.
+- Turns used were well under the limits: at most 13/30 for repair and 24/40 for operator.
+- Tools: repair used Bash, Read, Write and Edit only; operator leaned on Bash (7–11 calls) and Read
+  (up to 13).
 
 ## Settings bake-off (step 6)
 
-| Model | Effort | Compact window | Repair pass? | Cost / session |
-|---|---|---|---|---|
-| deepseek-flash | low | default | | |
-| deepseek-flash | high | default | | |
+Repair task, 3 runs each, 2026-10-29. Cost is `capability.py`'s estimate (average per run).
+
+| Model | Effort | Compact window | Repair pass? | Turns | Time | Cost / session |
+|---|---|---|---|---|---|---|
+| deepseek-flash | low | default | 3/3 | 8 / 13 / 9 | 22–37 s | $0.0095 |
+| deepseek-flash | high | default | 3/3 | 12 / 9 / 13 | 34–40 s | $0.0112 |
+
+High effort gave no gain in pass rate on this task and cost about 18% more per session. Only the
+default compact window was tried: no run came close to filling it. `deepseek-v4-pro` wasn't
+needed, because Flash passed repair.
+
+## Cost check (step 7)
+
+- DeepSeek console: the three high-effort repair runs cost about **$0.02**, against an estimate of
+  $0.034. Actual cost is roughly 60% of the estimate, so `capability.py`'s prices are on the safe
+  side.
+- Scaled the same way, a capability-sized session costs about $0.005–0.009. Real Phase 1–3 work
+  carries more context, so re-measure once real sessions run.
 
 ## Decision
 
-Go / no-go:
+**Go / no-go: GO** (2026-10-29). Each task passed 3 of 3 runs (needed 2/3), the full smoke test
+passed 26/26, and the peak session cost is far below what $10/month allows.
 
-Turn limit and session frequency:
+**Settings:** `deepseek-flash`, effort `low` (high effort brought no gain), Claude Code 2.1.310 pinned.
+
+**Turn limit and session frequency:** set provisionally, to be revisited in Phase 3:
+- Limits stay at 30 turns / 15 min for repair-type sessions and 40 turns / 20 min for
+  operator-type sessions. The most any run used was 24 turns and 54 s.
+- Frequency is decided with the agent's routine (plan §17, discussion 1). Budget: even if a real
+  session costs 10× a capability run (about $0.09), $10 covers about 110 sessions a month, so
+  start at 1–2 sessions a day and measure.
 
 ---
 
