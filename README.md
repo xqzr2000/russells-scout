@@ -3,7 +3,7 @@
 Project Scout finds data science, data analysis and ML jobs in Vancouver and stores them in
 PostgreSQL. Scouting scripts run on timers with zero LLM tokens; an agent (Claude Code on the
 DeepSeek API, in a hardened container) builds and repairs those scripts.
-Full design: [docs/architecture-plan.md](docs/architecture-plan.md) (v3.0).
+Full design: [docs/architecture-plan.md](docs/architecture-plan.md) (v3.2).
 
 > This project uses Crawl4AI (<https://github.com/unclecode/crawl4ai>) for web data extraction.
 
@@ -12,13 +12,14 @@ Full design: [docs/architecture-plan.md](docs/architecture-plan.md) (v3.0).
 | Phase | What | Status |
 |---|---|---|
 | 0 | Claude Code on DeepSeek in a hardened container on the box; locked rules; smoke tests; capability tests | **done: GO** (2026-10-29). 26/26 smoke, capability tests 3/3 on repair and operator; `deepseek-flash` at low effort ([results](docs/phase0-results.md), [box setup](docs/box-setup.md)) |
-| 1 | Scouting slice: Postgres, ATS adapters, trust scoring, dedupe (zero tokens) | |
+| 1 | Scouting slice: WorkBC job board search, Postgres, Ashby/Greenhouse/Lever enrichment, dedupe, trust scoring (zero tokens) | **planned** (2026-10-30, [Phase 1 plan](docs/phase1-plan.md)) |
 | 2 | Scout runtime, daily digest, WSL2 sync, backups | |
 | 3 | The agent takes over (sessions on a timer, `CLAUDE.md`, local git repo) | |
 | 4–5 | Discovery and long-run hardening | |
 
-The crawl4ai scaffold below (devcontainer, `src/scout`, sample extraction) is the starting
-point for Phase 1.
+The crawl4ai scaffold below (devcontainer, `src/scout`, sample extraction) is where the Phase 1
+code goes. Phase 1 itself doesn't need a browser: WorkBC and the ATS boards return JSON.
+Crawl4AI stays for custom career pages later.
 
 ## Repository layout
 
@@ -29,7 +30,7 @@ point for Phase 1.
 | `agent/managed-settings/` | Locked permission rules and guard hook (installed read-only on the host) |
 | `agent/run-session.sh` | Start one headless session with a turn limit and timeout |
 | `agent/phase0/` | Smoke tests, guard-rule tests, capability tests (`capability.py`, `tasks/`) |
-| `docs/` | Architecture plan, box setup, Phase 0 results |
+| `docs/` | Architecture plan, box setup, Phase 0 results, Phase 1 plan |
 | `src/scout/`, `tests/`, `Dockerfile`, `.devcontainer/` | crawl4ai scaffold (stage 1) |
 
 ## Agent on the Ubuntu box
