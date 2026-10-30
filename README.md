@@ -11,7 +11,7 @@ Full design: [docs/architecture-plan.md](docs/architecture-plan.md) (v3.0).
 
 | Phase | What | Status |
 |---|---|---|
-| 0 | Claude Code on DeepSeek in a hardened container on the box; locked rules; smoke tests; capability tests | **fresh box install in progress** (2026-10-28, [box setup](docs/box-setup.md)); first install's findings in [results](docs/phase0-results.md) |
+| 0 | Claude Code on DeepSeek in a hardened container on the box; locked rules; smoke tests; capability tests | **done: GO** (2026-10-29). 26/26 smoke, capability tests 3/3 on repair and operator; `deepseek-flash` at low effort ([results](docs/phase0-results.md), [box setup](docs/box-setup.md)) |
 | 1 | Scouting slice: Postgres, ATS adapters, trust scoring, dedupe (zero tokens) | |
 | 2 | Scout runtime, daily digest, WSL2 sync, backups | |
 | 3 | The agent takes over (sessions on a timer, `CLAUDE.md`, local git repo) | |
