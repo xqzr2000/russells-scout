@@ -151,3 +151,15 @@ def title_match(title: str, terms: Iterable[str]) -> TitleMatch:
         if f" {phrase} " in title_words or f" {phrase}s " in title_words:
             exact.append(term)
     return TitleMatch("exact" if exact else "loose", tuple(exact))
+
+
+def term_hits(title: str, terms: Iterable[str]) -> tuple[str, ...]:
+    """Terms whose words all appear in the title, in any order: what WorkBC's title search
+    returns. Used to filter postings found directly on job boards the same way."""
+    words = set(_words(title))
+    hits = []
+    for term in terms:
+        tw = _words(term)
+        if tw and all(w in words or f"{w}s" in words for w in tw):
+            hits.append(term)
+    return tuple(hits)

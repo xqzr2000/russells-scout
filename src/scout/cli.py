@@ -9,7 +9,11 @@
                       Search WorkBC for every term in config/search.json, classify the
                       postings, print a summary and save them to the database.
                       --dry-run writes nothing to the database; --replay (with
-                      --dry-run) re-runs the rules on a saved sweep, offline.
+                      --dry-run) re-runs the rules on a saved sweep, offline. After
+                      saving, the job boards are read too (--no-enrich to skip).
+  scout enrich [--dry-run] [--board ATS:BOARD ...]
+                      Read the Ashby, Greenhouse and Lever boards of saved postings:
+                      details for those postings, plus matching jobs only on the boards.
 
 Add --show-browser to either command to run Chromium with a visible window
 (only works where there's a display, i.e. not in Codespaces).
@@ -107,6 +111,17 @@ def main(argv: list[str] | None = None) -> int:
     p_sweep.add_argument(
         "--replay", metavar="SWEEP", help="use a saved sweep (e.g. sweep-20261031-065758Z)"
     )
+    p_sweep.add_argument("--no-enrich", action="store_true", help="don't read job boards after")
+
+    p_enrich = sub.add_parser("enrich", help="read Ashby, Greenhouse and Lever boards")
+    p_enrich.add_argument("--dry-run", action="store_true", help="report only; write nothing")
+    p_enrich.add_argument(
+        "--board",
+        action="append",
+        dest="boards",
+        metavar="ATS:BOARD",
+        help="only this board, e.g. lever:fabrikam (repeatable)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -116,8 +131,14 @@ def main(argv: list[str] | None = None) -> int:
         from scout import sweep
 
         return sweep.run(
-            args.dry_run, terms=args.terms, save_raw=not args.no_save, replay=args.replay
+            args.dry_run,
+            terms=args.terms,
+            save_raw=not args.no_save,
+            replay=args.replay,
+            enrich_after=not args.no_enrich,
         )
+    if args.command == "enrich":
+        return run_enrich(args.dry_run, args.boards)
     headless = not args.show_browser
 
     if args.command == "smoke":
@@ -125,6 +146,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "sample":
         return asyncio.run(sample(headless))
     return 2
+
+
+def run_enrich(dry_run: bool, boards: list[str] | None) -> int:
+    from scout import config, db, enrich
+
+    try:
+        cfg = config.load()
+        conn = db.connect("reader" if dry_run else "ingest", autocommit=True)
+    except (config.ConfigError, db.DbError) as e:
+        print(f"ERROR: {e}")
+        return 1
+    with conn:
+        stats = enrich.enrich(conn, cfg, dry_run=dry_run, only=boards)
+    enrich.report(stats, dry_run=dry_run)
+    return 0 if all(b.outcome in ("ok", "empty") for b in stats.boards) else 1
 
 
 def run_db(action: str) -> int:

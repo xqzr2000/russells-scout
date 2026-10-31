@@ -274,12 +274,32 @@ def test_scout_sweep_command_saves_and_reruns_cleanly(clean_db):
         return page if body["Keyword"] == "data scientist" else empty
 
     first: list[str] = []
-    assert sweep.run(False, out=first.append, post=post, sleep=lambda s: None, save_raw=False) == 0
+    assert (
+        sweep.run(
+            False,
+            out=first.append,
+            post=post,
+            sleep=lambda s: None,
+            save_raw=False,
+            enrich_after=False,
+        )
+        == 0
+    )
     assert "WorkBC sweep (saving to the database)" in first[0]
     assert any("new 2, changed 0, seen again 0" in line for line in first)
 
     second: list[str] = []
-    assert sweep.run(False, out=second.append, post=post, sleep=lambda s: None, save_raw=False) == 0
+    assert (
+        sweep.run(
+            False,
+            out=second.append,
+            post=post,
+            sleep=lambda s: None,
+            save_raw=False,
+            enrich_after=False,
+        )
+        == 0
+    )
     assert any("new 0, changed 0, seen again 2" in line for line in second)
     assert any("not seen this time: 0" in line for line in second)
 

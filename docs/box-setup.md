@@ -375,6 +375,34 @@ q "SELECT id, started_at, ok, terms_ok, terms_failed FROM scout_runs ORDER BY id
 (Inside the container, local connections need no password. From Windows, use the SSH tunnel
 from step 12 and the `scout_reader` password.)
 
+## 15. Job-board details: Ashby, Greenhouse, Lever (Phase 1, box)
+
+For postings whose link goes to an Ashby, Greenhouse or Lever board, Scout reads the board
+itself (one request per board, one a second; no key needed). It adds the description, pay
+range (Ashby and Lever) and remote/hybrid/onsite to those postings, and also saves other jobs
+on the same boards that match a search term and are in Metro Vancouver or remote in Canada.
+Greenhouse links on a company's own site (`?gh_jid=`) don't name the board: Scout tries a few
+names made from the employer's name and keeps the one where that exact job exists.
+
+Try it first without writing anything:
+
+```bash
+cd /srv/scout/code
+docker compose --profile scout run --rm scout enrich --dry-run
+```
+
+Then for real. `scout sweep` now does it after saving (add `--no-enrich` to skip), or on its own:
+
+```bash
+docker compose --profile scout run --rm scout enrich
+docker compose --profile scout run --rm scout enrich --board lever:wmg     # one board
+q "SELECT title, employer, workplace, pay_min, pay_max, pay_currency, found_via FROM v_new_relevant_7d WHERE pay_min IS NOT NULL"
+q "SELECT name, status, consecutive_failures, last_success_at FROM sources WHERE kind = 'ats' ORDER BY name"
+```
+
+Jobs found only on a board (`found_via = 'ats'`) are removed after 3 runs in which their board
+answered without them. A board that fails is retried next time and marks nothing missed.
+
 ---
 
 ## Updating
