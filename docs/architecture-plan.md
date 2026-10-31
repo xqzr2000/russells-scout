@@ -520,7 +520,7 @@ removed; no LLM calls.
 
 ### Phase 2 — Runtime, digest, sync, backups
 
-Scout runtime container with scheduler; supervisor and mailer; DB backups; WSL2 sync script, Task Scheduler job and restricted sync key. Exit: runs unattended for a week without the agent; digest arrives daily and shows sync status.
+**Plan:** [phase2-plan.md](phase2-plan.md) (draft; scheduling by host systemd timers instead of an always-on container). Scout runtime container with scheduler; supervisor and mailer; DB backups; WSL2 sync script, Task Scheduler job and restricted sync key. Exit: runs unattended for a week without the agent; digest arrives daily and shows sync status.
 
 ### Phase 3 — The agent takes over
 
@@ -598,7 +598,7 @@ SSH: key-only login for `shaw2012`, LAN-only firewall, fixed address. A separate
 
 **Other open items**
 - Groq or other fallback provider: would need an Anthropic-compatible route; dropped for now.
-- SMTP provider for the digest.
+- SMTP provider for the digest: options in [phase2-plan.md](phase2-plan.md) §5.
 - ~~Initial list of Vancouver employers and their ATS~~ — resolved 2026-10-30: employers are discovered from WorkBC postings.
 - ~~Search criteria~~ — resolved 2026-10-30: initial terms and area in [phase1-plan.md](phase1-plan.md) §2.
 - ~~Exact managed-settings path and hook set~~ — resolved in Phase 0: `/etc/claude-code/managed-settings.json` in the container, from `/srv/scout/policy/` on the host.
