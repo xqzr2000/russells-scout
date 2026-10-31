@@ -120,7 +120,8 @@ class SweepResult:
         return bool(self.terms) and all(t.outcome == "empty" for t in self.terms)
 
 
-def _slug(term: str) -> str:
+def slug(term: str) -> str:
+    """File-name form of a term: 'AI engineer' -> 'ai_engineer'."""
     return re.sub(r"[^a-z0-9]+", "_", term.lower()).strip("_") or "term"
 
 
@@ -213,7 +214,7 @@ def fetch_term(
         res.error = None
 
         if saver:
-            saver.save(f"{_slug(term)}-p{page}.json", raw)
+            saver.save(f"{slug(term)}-p{page}.json", raw)
         try:
             count, jobs = _parse_page(raw)
         except ValueError as e:

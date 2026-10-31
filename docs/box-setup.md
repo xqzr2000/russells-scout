@@ -310,6 +310,25 @@ About a dozen requests, one a second. The last line should say `complete sweep: 
 For one term only: `… sweep --dry-run --term "data scientist"`. To change the terms,
 edit `config/search.json` on GitHub, pull, and rebuild the scout image.
 
+To re-run the rules on a sweep you already saved, without contacting WorkBC (useful after
+a code change, or to compare), give its folder name from `/srv/scout/logs/workbc/`:
+
+```bash
+docker compose --profile scout run --rm scout sweep --dry-run --replay sweep-20261031-065758Z
+```
+
+The summary has four parts:
+
+- **Terms:** each term's outcome (table below), WorkBC's count and how many came back.
+- **Where:** Metro Vancouver (`metro`), `remote`, `other_bc`, `outside` or `unknown`, plus
+  remote/hybrid/onsite where it's known. Each remote posting is listed with the reason.
+- **Title match:** among Metro Vancouver and remote postings, `exact` (a search term appears
+  as a phrase in the title, a strong match) or `loose` (possible match), with the possible ones
+  listed so you can judge the terms.
+- **Employers and job-board systems:** employers after merging name variants, Job Bank
+  postings, the job-board system of every link, and the Ashby, Greenhouse and Lever boards
+  (the ones Scout will read in task 1.8).
+
 | Outcome | Meaning |
 |---|---|
 | `ok` / `empty` | Fine. `empty` means WorkBC has no postings for that term today. |
