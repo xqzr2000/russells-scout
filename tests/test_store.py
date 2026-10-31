@@ -286,3 +286,31 @@ def test_scout_sweep_command_saves_and_reruns_cleanly(clean_db):
     with db.connect("reader") as c:
         assert c.execute("SELECT count(*) FROM postings").fetchone()[0] == 2
         assert c.execute("SELECT count(*) FROM scout_runs WHERE ok").fetchone()[0] == 2
+
+
+@needs_db
+def test_duplicates_are_grouped_and_stable(conn):
+    """Task 1.7: the Activision case lands in one group; a rerun changes nothing."""
+
+    def act(n, employer, url):
+        j = job(n, "Data Scientist, Anti-Cheat", employer=employer)
+        j["ExternalSource"] = {"Source": [{"Source": "x", "Url": url}]}
+        return j
+
+    data = {
+        "data scientist": [
+            act(1, "Activision Blizzard", "https://careers.activisionblizzard.com/job/ACCOUSR028031EXTERNAL/DS"),
+            act(2, "Activision Blizzard, Inc.", "https://games.wd1.myworkdayjobs.com/E/job/SO/DS_R028031-1"),
+            act(3, "Activision", "https://careers.activision.com/job/ACPUUSR028031EXTERNAL/DS"),
+            job(4),
+        ]
+    }  # fmt: skip
+    s = save(conn, data)
+    assert (s.dup_groups, s.dup_postings, s.dup_changed) == (1, 3, 3)
+    rows = conn.execute("SELECT id, dup_group_id FROM v_duplicates").fetchall()
+    assert len(rows) == 3 and len({g for _, g in rows}) == 1
+    assert rows[0][1] == min(i for i, _ in rows)
+    assert one(conn, "SELECT dup_group_id FROM postings WHERE workbc_job_id = 't0004'") == (None,)
+
+    s = save(conn, data)
+    assert (s.dup_groups, s.dup_changed) == (1, 0)

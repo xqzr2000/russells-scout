@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scout import config, db, store
+from scout.pipeline import dupes
 from scout.pipeline.record import PostingRecord, build
 from scout.sources import workbc
 
@@ -117,6 +118,21 @@ def summarize(
         out(line + (f"; {unknown} posting(s) with board not in the link" if unknown else ""))
     custom = Counter(r.link_host for r in records if r.ats == "custom")
     out("  own career sites: " + _counts(custom, 12))
+
+    now = datetime.now(UTC)
+    items = [
+        dupes.Item(r.workbc_job_id, r.canonical_url, r.employer_norm, r.title, now, r.jump_url)
+        for r in records
+    ]
+    groups: dict = {}
+    for job_id, group in dupes.groups(items).items():
+        groups.setdefault(group, []).append(job_id)
+    by_id = {r.workbc_job_id: r for r in records}
+    out("")
+    out(f"== likely duplicates: {len(groups)} group(s), {sum(map(len, groups.values()))} postings")
+    for members in list(groups.values())[:8]:
+        out("  " + " | ".join(f"{by_id[m].employer_name} ({by_id[m].link_host})" for m in members))
+        out(f"    {by_id[members[0]].title}")
 
     seconds = result.finished_at - result.started_at
     pages = sum(max(t.pages, 1) for t in result.terms)
@@ -216,6 +232,10 @@ def report_saved(stats: store.SaveStats, out=print) -> None:
     )
     if stats.skipped_area:
         out(f"  not saved because of the area settings: {stats.skipped_area}")
+    out(
+        f"  likely duplicates: {stats.dup_groups} group(s), {stats.dup_postings} postings"
+        f" ({stats.dup_changed} changed this run; see v_duplicates)"
+    )
     if stats.removal_checked:
         out(
             f"  not seen this time: {stats.marked_missed} (counted as missed);"

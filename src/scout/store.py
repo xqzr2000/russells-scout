@@ -30,6 +30,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from scout.config import SearchConfig
+from scout.pipeline import dupes
 from scout.pipeline.record import PostingRecord
 from scout.sources.workbc import SweepResult
 
@@ -51,6 +52,9 @@ class SaveStats:
     removed: int = 0
     removal_checked: bool = False
     employers_new: int = 0
+    dup_groups: int = 0
+    dup_postings: int = 0
+    dup_changed: int = 0
     notes: list[str] = field(default_factory=list)
 
 
@@ -265,5 +269,25 @@ def save_sweep(
                 " THEN 'degraded' ELSE status END WHERE id = %s",
                 (source_id,),
             )
+        regroup(conn, stats)
         conn.execute("UPDATE scout_runs SET finished_at = now() WHERE id = %s", (run_id,))
+    return stats
+
+
+def regroup(conn: psycopg.Connection, stats: SaveStats | None = None) -> SaveStats:
+    """Recompute dup_group_id for every posting (task 1.7). Cheap: a few hundred rows."""
+    stats = stats or SaveStats()
+    rows = conn.execute(
+        "SELECT p.id, p.canonical_url, e.name_norm, p.title, p.first_seen_at, p.jump_url,"
+        " p.dup_group_id FROM postings p LEFT JOIN employers e ON e.id = p.employer_id"
+    ).fetchall()
+    items = [dupes.Item(r[0], r[1], r[2], r[3], r[4], r[5]) for r in rows]
+    new = dupes.groups(items)
+    changed = [(new.get(r[0]), r[0]) for r in rows if new.get(r[0]) != r[6]]
+    if changed:
+        with conn.cursor() as cur:
+            cur.executemany("UPDATE postings SET dup_group_id = %s WHERE id = %s", changed)
+    stats.dup_groups = len(set(new.values()))
+    stats.dup_postings = len(new)
+    stats.dup_changed = len(changed)
     return stats

@@ -34,7 +34,13 @@ EXPECTED_TABLES = (
     "postings",
     "posting_events",
 )
-EXPECTED_VIEWS = ("v_new_relevant_7d", "v_review", "v_suspicious", "v_source_health")
+EXPECTED_VIEWS = (
+    "v_new_relevant_7d",
+    "v_review",
+    "v_suspicious",
+    "v_source_health",
+    "v_duplicates",
+)
 MIGRATION_RE = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 
 
