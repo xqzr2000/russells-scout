@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 import psycopg
 from psycopg.types.json import Jsonb
 
+from scout import trust
 from scout.config import SearchConfig
 from scout.pipeline import dupes
 from scout.pipeline.record import PostingRecord
@@ -55,6 +56,7 @@ class SaveStats:
     dup_groups: int = 0
     dup_postings: int = 0
     dup_changed: int = 0
+    suspicious: int = 0
     notes: list[str] = field(default_factory=list)
 
 
@@ -274,6 +276,7 @@ def save_sweep(
                 (source_id,),
             )
         regroup(conn, stats)
+        stats.suspicious, _ = trust.rescore(conn)
         conn.execute("UPDATE scout_runs SET finished_at = now() WHERE id = %s", (run_id,))
     return stats
 

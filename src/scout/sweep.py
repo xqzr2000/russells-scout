@@ -24,7 +24,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scout import config, db, enrich, store
+from scout import config, db, enrich, store, trust
 from scout.pipeline import dupes
 from scout.pipeline.record import PostingRecord, build
 from scout.sources import workbc
@@ -130,6 +130,15 @@ def summarize(
         groups.setdefault(group, []).append(job_id)
     by_id = {r.workbc_job_id: r for r in records}
     out("")
+    scored = [(trust.score(trust_input(r)), r) for r in records]
+    flagged = [(s, r) for s, r in scored if s[0] < 0]
+    out("== trust (before job-board details)")
+    out("  scores: " + _counts(Counter(s[0] for s, _ in scored), 10))
+    out(f"  suspicious (below 0): {len(flagged)}")
+    for (value, reasons), r in flagged[:10]:
+        out(f"  {value:+d} {r.title} | {r.employer_name} | {', '.join(reasons)}")
+
+    out("")
     out(f"== likely duplicates: {len(groups)} group(s), {sum(map(len, groups.values()))} postings")
     for members in list(groups.values())[:8]:
         out("  " + " | ".join(f"{by_id[m].employer_name} ({by_id[m].link_host})" for m in members))
@@ -230,6 +239,15 @@ def run(
     return 0 if result.complete else 1
 
 
+def trust_input(r: PostingRecord) -> trust.TrustInput:
+    return trust.TrustInput(
+        title=r.title, employer_name=r.employer_name, employer_norm=r.employer_norm, ats=r.ats,
+        ats_board=r.ats_board, jump_url=r.jump_url, link_host=r.link_host,
+        is_job_bank=r.is_job_bank, found_via="workbc", enriched=False,
+        salary_text=r.salary_text,
+    )  # fmt: skip
+
+
 def report_saved(stats: store.SaveStats, out=print) -> None:
     out("")
     out(f"== saved to the database (run {stats.run_id})")
@@ -243,6 +261,7 @@ def report_saved(stats: store.SaveStats, out=print) -> None:
         f"  likely duplicates: {stats.dup_groups} group(s), {stats.dup_postings} postings"
         f" ({stats.dup_changed} changed this run; see v_duplicates)"
     )
+    out(f"  suspicious postings (trust score below 0): {stats.suspicious}; see v_suspicious")
     if stats.removal_checked:
         out(
             f"  not seen this time: {stats.marked_missed} (counted as missed);"
