@@ -2,3 +2,6 @@
 # all run exactly the same versions. Bump deliberately, then rebuild the container.
 crawl4ai==0.9.4
 playwright==1.63.0
+# Postgres driver (also in requirements-runtime.txt; keep the versions equal).
+psycopg==3.3.6
+psycopg-binary==3.3.6

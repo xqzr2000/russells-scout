@@ -12,7 +12,7 @@ Full design: [docs/architecture-plan.md](docs/architecture-plan.md) (v3.2).
 | Phase | What | Status |
 |---|---|---|
 | 0 | Claude Code on DeepSeek in a hardened container on the box; locked rules; smoke tests; capability tests | **done: GO** (2026-10-29). 26/26 smoke, capability tests 3/3 on repair and operator; `deepseek-flash` at low effort ([results](docs/phase0-results.md), [box setup](docs/box-setup.md)) |
-| 1 | Scouting slice: WorkBC job board search, Postgres, Ashby/Greenhouse/Lever enrichment, dedupe, trust scoring (zero tokens) | **planned** (2026-10-30, [Phase 1 plan](docs/phase1-plan.md)) |
+| 1 | Scouting slice: WorkBC job board search, Postgres, Ashby/Greenhouse/Lever enrichment, dedupe, trust scoring (zero tokens) | **in progress**: 1.1 database built ([Phase 1 plan](docs/phase1-plan.md), [box setup §12](docs/box-setup.md#12-database-phase-1-box-once)) |
 | 2 | Scout runtime, daily digest, WSL2 sync, backups | |
 | 3 | The agent takes over (sessions on a timer, `CLAUDE.md`, local git repo) | |
 | 4–5 | Discovery and long-run hardening | |
@@ -25,11 +25,14 @@ Crawl4AI stays for custom career pages later.
 
 | Path | What |
 |---|---|
-| `compose.yaml` | Services on the box (today: the agent) |
+| `compose.yaml` | Services on the box: the agent, Postgres (`db`) and the scouting code (`scout`) |
 | `agent/Dockerfile` | Agent image: Node 22, Claude Code 2.1.310 (pinned), Python, git |
 | `agent/managed-settings/` | Locked permission rules and guard hook (installed read-only on the host) |
 | `agent/run-session.sh` | Start one headless session with a turn limit and timeout |
 | `agent/phase0/` | Smoke tests, guard-rule tests, capability tests (`capability.py`, `tasks/`) |
+| `migrations/` | Numbered SQL files for the database, applied with `scout db migrate` |
+| `ops/db/` | Database setup: role creation on first start, password generator ([README](ops/db/README.md)) |
+| `src/scout/db.py` | `scout db migrate / status / check` |
 | `docs/` | Architecture plan, box setup, Phase 0 results, Phase 1 plan |
 | `src/scout/`, `tests/`, `Dockerfile`, `.devcontainer/` | crawl4ai scaffold (stage 1) |
 

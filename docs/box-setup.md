@@ -1,4 +1,4 @@
-# Box setup: Claude Code on DeepSeek (Phase 0)
+# Box setup: the agent (Phase 0) and the database (Phase 1)
 
 How to set up the agent container on the Ubuntu box from scratch, working from WSL2.
 Design background: [architecture-plan.md](architecture-plan.md) §5, §7 and §13.
@@ -14,11 +14,13 @@ Everything Scout uses on the box lives under `/srv/scout`:
 /srv/scout/
 ├── code/                    read-only clone of the public GitHub repo (owned by shaw2012)
 ├── secrets/deepseek.env     your DeepSeek key, mode 600, never in git
+├── secrets/db-*.env         database passwords (Phase 1, step 12), mode 600
 ├── policy/                  live locked rules, root-owned, mounted read-only into the agent
 │   ├── managed-settings.json
 │   └── hooks/guard.sh
 ├── workspace/               the agent's only writable folder (uid 10001)
-└── logs/                    session results and smoke-test reports
+├── logs/                    session results and smoke-test reports
+└── pgdata/                  Postgres data (Phase 1, step 12); only the db container reads it
 ```
 
 Only `workspace/` and `policy/` are mounted into the agent container. The agent can't see
@@ -239,6 +241,50 @@ mkdir -p ~/scout-logs && scp -r 'scoutbox:/srv/scout/logs/*' ~/scout-logs/
 
 Or open the box in **VS Code → Remote-SSH → scoutbox** and browse `/srv/scout/`.
 
+## 12. Database (Phase 1, box, once)
+
+Postgres runs in its own container (profile `scout`), always on, listening on the box's
+localhost only. Its data lives in `/srv/scout/pgdata`, which only that container can read.
+The scouting code runs in a second, slim container (`scout`, no browser) one command at a time.
+
+```bash
+cd /srv/scout/code
+# Data folder, owned by the container's postgres user (uid 999), nobody else.
+sudo mkdir -p /srv/scout/pgdata && sudo chown 999:999 /srv/scout/pgdata && sudo chmod 700 /srv/scout/pgdata
+# Random passwords for the superuser and the four scout_* roles (mode 600).
+ops/db/make-secrets.sh
+ls -l /srv/scout/secrets
+```
+
+Start the database. The first start creates the `scout` database and the four roles (about 10–20 s):
+
+```bash
+docker compose --profile scout up -d db
+docker compose --profile scout ps db                    # wait for "(healthy)"
+docker compose --profile scout logs db | grep -E "01-roles|ready to accept" | tail -3
+```
+
+Build the scout image, create the tables and check every role's permissions:
+
+```bash
+docker compose --profile scout build scout              # a minute or two the first time
+docker compose --profile scout run --rm scout db migrate
+docker compose --profile scout run --rm scout db check  # expect "49 passed, 0 failed"
+```
+
+| Role | Who uses it | Can |
+|---|---|---|
+| `scout_migrate` | you, through `scout db migrate` | change tables (the only one) |
+| `scout_ingest` | the scouting code | read; add and update data; no deletes, history is append-only |
+| `scout_agent` | the agent, from Phase 3 | same as `scout_ingest` |
+| `scout_reader` | you, from Windows | read only |
+
+The agent container is on a different Docker network and can't reach the database.
+
+To look at the data from Windows later: `ssh -L 5432:localhost:5432 scoutbox` in WSL2, then
+connect DBeaver or pgAdmin to `localhost:5432`, database `scout`, user `scout_reader`, with the
+password from `/srv/scout/secrets/db-roles.env`.
+
 ---
 
 ## Updating
@@ -253,6 +299,10 @@ sudo install -o root -g root -m 644 agent/managed-settings/managed-settings.json
 sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh /srv/scout/policy/hooks/
 docker compose --profile agent build agent
 agent/phase0/smoke.sh --offline
+# Phase 1 on: rebuild the scout image and apply any new migrations.
+docker compose --profile scout build scout
+docker compose --profile scout run --rm scout db migrate
+docker compose --profile scout run --rm scout db check
 ```
 
 Your key, workspace and logs in `/srv/scout` are not touched. To go back if something breaks:
@@ -266,9 +316,17 @@ through the web UI; nothing on the box is ever pushed.
 To wipe Scout from the box and repeat this guide from step 2:
 
 ```bash
+docker compose --profile scout down
 docker ps -a --filter name=scout -q | xargs -r docker rm -f
-docker image rm scout-agent:dev
+docker image rm scout-agent:dev scout-runtime:dev
 sudo rm -rf /srv/scout
+```
+
+To reset only the database (all data lost; new passwords), then repeat step 12:
+
+```bash
+docker compose --profile scout down
+sudo rm -rf /srv/scout/pgdata /srv/scout/secrets/db-admin.env /srv/scout/secrets/db-roles.env
 ```
 
 Revoke the DeepSeek key on the console if you're not reusing it.
@@ -288,6 +346,10 @@ Revoke the DeepSeek key on the console if you're not reusing it.
 | A session never returns, even after the timeout | Something is reading the terminal. `run-session.sh` feeds sessions `</dev/null`; do the same if you run `docker compose run … claude -p` by hand under `timeout`. |
 | `[claude-code:unrecognized_model] deepseek-flash` on stderr | Harmless: Claude Code doesn't know DeepSeek's model names. |
 | "Managed settings document could not be parsed" | `/srv/scout/policy/managed-settings.json` isn't valid JSON; re-install from the repo (step 5). |
+| `db` never becomes healthy | `docker compose --profile scout logs db`. "Permission denied" on the data folder: re-run the `chown 999:999` line in step 12. |
+| `password authentication failed for user "scout_…"` | `db-roles.env` changed after the database was first created. Passwords are set only on first start: reset the database (Starting over). |
+| `db check` fails with "migrations not applied" | `docker compose --profile scout run --rm scout db migrate` |
+| `… was edited after it was applied` | A migration file changed on GitHub. Applied migrations are never edited; put the change in a new numbered file. |
 | `Permission denied` in `/workspace` | `sudo chown 10001 /srv/scout/workspace` |
 | Can't read agent files on the host | They're owned by uid 10001; your group can read them if step 2 was followed. Otherwise `sudo ls /srv/scout/workspace`. |
 

@@ -1,6 +1,6 @@
 # Phase 1 plan: WorkBC-first scouting slice
 
-Status: **planned** (2026-10-30). Plan: [architecture-plan.md](architecture-plan.md) §9 and §13.
+Status: **in progress**: task 1.1 (database) built 2026-10-30, waiting for its first run on the box. Plan: [architecture-plan.md](architecture-plan.md) §9 and §13.
 Zero LLM tokens: everything here is plain code that runs on a timer from Phase 2 on.
 
 ## 1. What WorkBC gives us (probe on the box, 2026-10-30)
@@ -187,7 +187,7 @@ plan §8. Postgres runs in a container on the box, listening on localhost only, 
 
 | # | Task | Done when |
 |---|---|---|
-| 1.1 | Postgres service in `compose.yaml` (profile `scout`), `/srv/scout/pgdata`, first migration, roles, views | `scout db check` connects as each role; `scout_reader` can't write |
+| 1.1 | Postgres service in `compose.yaml` (profile `scout`), `/srv/scout/pgdata`, first migration, roles, views | `scout db check` connects as each role; `scout_reader` can't write. **Built**: [box-setup.md §12](box-setup.md#12-database-phase-1-box-once) |
 | 1.2 | `config/search.json` + loader with validation | bad config fails with a clear message |
 | 1.3 | WorkBC client: request body, paging, per-term success, raw-response saving, polite delay | unit tests on synthetic fixtures (paging, empty term, malformed response) |
 | 1.4 | Area, workplace and title-match rules | table-driven tests, including every city and remote case in §1 |

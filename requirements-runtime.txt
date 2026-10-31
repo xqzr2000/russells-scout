@@ -1,0 +1,4 @@
+# Runtime dependencies for the slim `scout` image on the box (no browser).
+# Used by the Dockerfile's `runtime` stage. Bump deliberately, then rebuild.
+psycopg==3.3.6
+psycopg-binary==3.3.6

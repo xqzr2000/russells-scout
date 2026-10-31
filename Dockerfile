@@ -4,7 +4,9 @@
 #   base  - Python + Chromium + crawl4ai. Shared by every environment.
 #   dev   - base + git, sudo, a "vscode" user and test tools. Used by the devcontainer
 #           (Codespaces and local VS Code).
-#   prod  - (stage 4) base + our code only, run on the Ubuntu box.
+#   runtime - slim Python + Postgres driver + our code, no browser. The `scout` service
+#             on the box (compose profile "scout"): `scout db ...` now, the WorkBC
+#             sweep next. Built separately from base, so it stays small.
 #
 # Same base image family as upstream crawl4ai's own Dockerfile (Debian bookworm, Python 3.12).
 
@@ -55,3 +57,31 @@ RUN pip install -r /tmp/requirements-dev.txt \
     && chown -R $USERNAME:$USERNAME /opt/venv
 
 USER $USERNAME
+
+
+FROM python:3.12-slim-bookworm AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    SCOUT_MIGRATIONS_DIR=/app/migrations
+
+RUN python -m venv /opt/venv
+
+COPY requirements-runtime.txt /tmp/requirements-runtime.txt
+RUN pip install -r /tmp/requirements-runtime.txt
+
+# Our package without its browser dependencies (crawl4ai stays out of this image).
+COPY pyproject.toml /app/
+COPY src /app/src
+COPY migrations /app/migrations
+RUN pip install --no-deps /app \
+    && useradd --uid 10002 --no-create-home --shell /usr/sbin/nologin scout
+
+USER 10002
+WORKDIR /app
+ENTRYPOINT ["scout"]
+CMD ["--help"]
