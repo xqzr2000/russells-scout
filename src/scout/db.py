@@ -33,6 +33,7 @@ EXPECTED_TABLES = (
     "run_source_results",
     "postings",
     "posting_events",
+    "digests",
 )
 EXPECTED_VIEWS = (
     "v_new_relevant_7d",

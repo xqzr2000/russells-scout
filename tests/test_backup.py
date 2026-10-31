@@ -122,7 +122,9 @@ def no_scratch_database() -> bool:
 
 @needs_superuser
 def test_backup_dumps_and_restore_checks(tmp_path, some_data):
-    r = run_script(tmp_path, extra_env=pg_env())
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    r = run_script(tmp_path, extra_env={**pg_env(), "SCOUT_LOG_DIR": str(logs)})
     assert r.returncode == 0, r.stdout + r.stderr
     dumps = list(tmp_path.glob("scout-*.dump"))
     assert len(dumps) == 1 and dumps[0].stat().st_size > 1000
@@ -133,6 +135,9 @@ def test_backup_dumps_and_restore_checks(tmp_path, some_data):
     assert "scout_runs=1" in r.stdout
     assert not list(tmp_path.glob("*.partial"))
     assert no_scratch_database()
+    copy = logs / "backup-status"  # for the digest container
+    assert copy.read_text() == (tmp_path / "status").read_text()
+    assert oct(copy.stat().st_mode & 0o777) == "0o644"
 
 
 @needs_superuser

@@ -8,13 +8,15 @@
 #    live database, drop the scratch database. A dump that doesn't restore is a failure.
 # 3. Keep the newest 14 dumps plus one dump from each of the last 8 Sundays; delete the
 #    rest. Only after a backup that passed its check.
-# 4. Write $SCOUT_HOME/backups/status (key=value lines; the daily digest reads it).
+# 4. Write $SCOUT_HOME/backups/status (key=value lines), and a copy readable by the
+#    digest container at $SCOUT_HOME/logs/backup-status.
 #
 # Exit code 0 only if the dump and its restore check both worked.
 #
 #   ops/backup.sh --prune-only    step 3 alone (used by the tests)
 #
 # Settings (environment): SCOUT_HOME (/srv/scout), SCOUT_BACKUP_DIR ($SCOUT_HOME/backups),
+# SCOUT_LOG_DIR ($SCOUT_HOME/logs),
 # SCOUT_KEEP_DAILY (14), SCOUT_KEEP_WEEKLY (8). For the tests only: SCOUT_BACKUP_DIRECT=1
 # runs the Postgres tools directly instead of inside the db container.
 
@@ -23,6 +25,7 @@ umask 027
 
 SCOUT_HOME=${SCOUT_HOME:-/srv/scout}
 BACKUPS=${SCOUT_BACKUP_DIR:-$SCOUT_HOME/backups}
+LOGS=${SCOUT_LOG_DIR:-$SCOUT_HOME/logs}
 KEEP_DAILY=${SCOUT_KEEP_DAILY:-14}
 KEEP_WEEKLY=${SCOUT_KEEP_WEEKLY:-8}
 SUPERUSER=${SCOUT_PG_SUPERUSER:-postgres}
@@ -99,6 +102,10 @@ write_status() {  # result message [bytes]
     echo "message=$2"
   } > "$tmp"
   mv -f "$tmp" "$BACKUPS/status"
+  # A readable copy for the digest container (it can't see into the backups folder).
+  if [[ -d $LOGS ]]; then
+    install -m 644 "$BACKUPS/status" "$LOGS/backup-status" || true
+  fi
 }
 
 fail() {

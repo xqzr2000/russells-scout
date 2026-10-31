@@ -116,6 +116,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("status", help="what's in the database, at a glance")
 
+    p_digest = sub.add_parser("digest", help="send the daily digest email")
+    g = p_digest.add_mutually_exclusive_group()
+    g.add_argument("--dry-run", action="store_true", help="print it; send and record nothing")
+    g.add_argument("--test-email", action="store_true", help="send a short test email only")
+
     p_enrich = sub.add_parser("enrich", help="read Ashby, Greenhouse and Lever boards")
     p_enrich.add_argument("--dry-run", action="store_true", help="report only; write nothing")
     p_enrich.add_argument(
@@ -146,6 +151,10 @@ def main(argv: list[str] | None = None) -> int:
         from scout import status
 
         return status.run()
+    if args.command == "digest":
+        from scout import digest
+
+        return digest.run(dry_run=args.dry_run, test_email=args.test_email)
     headless = not args.show_browser
 
     if args.command == "smoke":

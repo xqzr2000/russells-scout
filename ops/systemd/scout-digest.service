@@ -1,0 +1,15 @@
+# Installed by ops/systemd/install.sh, which fills in @USER@, @SCOUT_HOME@ and @DOCKER@.
+[Unit]
+Description=Scout: send the daily digest email
+Documentation=file://@SCOUT_HOME@/code/docs/box-setup.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@SCOUT_HOME@/code
+Environment=SCOUT_HOME=@SCOUT_HOME@
+TimeoutStartSec=10min
+ExecStart=@DOCKER@ compose --profile scout run --rm -T digest digest
