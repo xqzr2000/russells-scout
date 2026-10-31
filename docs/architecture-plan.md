@@ -398,7 +398,7 @@ A full sweep of all search terms takes about a dozen requests (176 postings on 2
 8. **Trust scoring:** §6.2.
 9. **Change detection:** content hash of the fields that matter (title, employer, city, salary text).
 10. **Removal safety:** a posting is `removed` only after missing from 3 consecutive sweeps in which
-    every term succeeded. WorkBC's expiry date for external postings is always 90 days after posting,
+    every term succeeded, and after 24 hours unseen. WorkBC's expiry date for external postings is always 90 days after posting,
     so it isn't used to decide that a job has closed.
 11. **Empty vs broken:** a term returning zero is normal; every term returning zero, or a response
     without the expected fields, is a structural failure (§11).
@@ -509,7 +509,7 @@ The old OpenHands spike code in `agent/spike/` is retired.
 
 ### Phase 1 — Scouting slice (zero tokens)
 
-Build plan: [phase1-plan.md](phase1-plan.md). Postgres, migrations, roles, views; WorkBC sweep;
+**Done (2026-10-31):** [phase1-results.md](phase1-results.md). Build plan: [phase1-plan.md](phase1-plan.md). Postgres, migrations, roles, views; WorkBC sweep;
 area and title-match rules; employer and ATS detection from links; Ashby, Greenhouse and Lever
 enrichment; duplicates, trust scoring, change detection, removal safety; fixtures and regression
 tests. Run by hand (`scout sweep`); scheduling comes in Phase 2.

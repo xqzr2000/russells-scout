@@ -230,7 +230,8 @@ def test_failing_board_does_not_stop_the_others(conn):
 
 
 @needs_db
-def test_board_postings_removed_after_three_misses(conn):
+def test_board_postings_removed_after_three_misses(conn, monkeypatch):
+    monkeypatch.setattr(store, "UNSEEN_BEFORE_REMOVED", "0 seconds")  # the clock stands still here
     sweep_save(conn)
     run(conn)
     ashby = json.loads((FIX / "ashby_northwind.json").read_text())

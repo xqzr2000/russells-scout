@@ -168,7 +168,21 @@ def test_changed_title_is_an_event_with_old_and_new(conn):
 
 
 @needs_db
-def test_removed_after_three_complete_sweeps_and_can_reappear(conn):
+def test_three_quick_misses_do_not_remove(conn):
+    """Seen live: three sweeps in 5 minutes. Removal also needs 24 hours unseen."""
+    save(conn, {"data scientist": [job(1), job(2)]})
+    for _ in range(3):
+        s = save(conn, {"data scientist": [job(1)]})
+    assert s.marked_missed == 1 and s.removed == 0
+    assert one(conn, "SELECT missed_runs, status FROM postings WHERE workbc_job_id = 't0002'") == (
+        3,
+        "active",
+    )
+
+
+@needs_db
+def test_removed_after_three_complete_sweeps_and_can_reappear(conn, monkeypatch):
+    monkeypatch.setattr(store, "UNSEEN_BEFORE_REMOVED", "0 seconds")  # the clock stands still here
     save(conn, {"data scientist": [job(1), job(2)]})
     for expected_misses in (1, 2):
         s = save(conn, {"data scientist": [job(1)]})
@@ -334,3 +348,29 @@ def test_duplicates_are_grouped_and_stable(conn):
 
     s = save(conn, data)
     assert (s.dup_groups, s.dup_changed) == (1, 0)
+
+
+@needs_db
+def test_scout_status_summarizes(clean_db):
+    from scout import status, sweep
+
+    page = json.dumps({"result": [job(1), job(2, "Data Analyst", city="British Columbia")],
+                       "count": 2}).encode()  # fmt: skip
+    empty = json.dumps({"result": [], "count": 0}).encode()
+    sweep.run(
+        False,
+        out=lambda _l: None,
+        sleep=lambda s: None,
+        save_raw=False,
+        enrich_after=False,
+        post=lambda url, body: page if body["Keyword"] == "data scientist" else empty,
+    )
+    lines: list[str] = []
+    assert status.run(out=lines.append) == 0
+    text = "\n".join(lines)
+    assert "active 2 (WorkBC 2, found on job boards 0); removed 0" in text
+    assert "relevant now (Metro Vancouver or remote, strong title match): 2" in text
+    assert "by area: " in text and "metro 1" in text and "remote 1" in text
+    assert "== recent runs" in text and "sweep  ok" in text
+    assert "== sources needing attention: none" in text
+    assert "== newest relevant jobs" in text and "Data Scientist | Northwind Analytics Inc." in text
