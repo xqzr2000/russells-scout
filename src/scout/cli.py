@@ -2,6 +2,9 @@
 
   scout smoke [URL]   Load a real page in Chromium, save markdown + metadata as JSON.
   scout sample        Extract jobs from examples/sample_careers.html, save as JSON.
+  scout db migrate    Apply new migrations/ files to Postgres (as scout_migrate).
+  scout db status     List applied and pending migrations.
+  scout db check      Connect as each role and check what it can and can't do.
 
 Add --show-browser to either command to run Chromium with a visible window
 (only works where there's a display, i.e. not in Codespaces).
@@ -14,9 +17,8 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 
-from scout.crawl import extract_jobs, fetch_page
-from scout.extract import SAMPLE_CAREERS_SCHEMA
-from scout.writers import write_json, write_postings
+# Browser code (crawl4ai, Chromium) is imported inside the commands that need it, so the
+# slim runtime image (no browser) can still run `scout db ...`.
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = REPO_ROOT / "output"
@@ -32,6 +34,9 @@ def _stamp() -> str:
 
 
 async def smoke(url: str, headless: bool) -> int:
+    from scout.crawl import fetch_page
+    from scout.writers import write_json
+
     result = await fetch_page(url, headless=headless)
     if not result.success:
         print(f"FAILED: {result.error_message}")
@@ -53,6 +58,10 @@ async def smoke(url: str, headless: bool) -> int:
 
 
 async def sample(headless: bool) -> int:
+    from scout.crawl import extract_jobs
+    from scout.extract import SAMPLE_CAREERS_SCHEMA
+    from scout.writers import write_postings
+
     url = SAMPLE_PAGE.as_uri()  # file:///.../examples/sample_careers.html
     postings = await extract_jobs(
         url,
@@ -79,7 +88,13 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("sample", help="extract jobs from the bundled sample careers page")
 
+    p_db = sub.add_parser("db", help="database: migrate, status, check")
+    p_db.add_argument("action", choices=["migrate", "status", "check"])
+
     args = parser.parse_args(argv)
+
+    if args.command == "db":
+        return run_db(args.action)
     headless = not args.show_browser
 
     if args.command == "smoke":
@@ -87,6 +102,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "sample":
         return asyncio.run(sample(headless))
     return 2
+
+
+def run_db(action: str) -> int:
+    from scout import db
+
+    try:
+        return {"migrate": db.migrate, "status": db.status, "check": db.check}[action]()
+    except db.DbError as e:
+        print(f"ERROR: {e}")
+        return 1
 
 
 if __name__ == "__main__":

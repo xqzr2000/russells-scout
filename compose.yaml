@@ -1,12 +1,22 @@
 # Project Scout services on the Ubuntu box.
 #
-# Today: only the agent (Claude Code on DeepSeek). Postgres and the scout
-# runtime are added in Phase 1/2 (docs/architecture-plan.md §13).
+# Services:
+#   agent  Claude Code on DeepSeek (profile "agent"), started by agent/run-session.sh
+#   db     PostgreSQL (profile "scout"), always on, localhost only
+#   scout  the scouting code (profile "scout"), run one command at a time:
+#            docker compose --profile scout run --rm scout db check
 #
 # Host folders live under SCOUT_HOME (default /srv/scout):
 #   ${SCOUT_HOME}/secrets/deepseek.env   your DeepSeek key (mode 600, never in git)
 #   ${SCOUT_HOME}/policy/                live locked settings + hook (root-owned)
 #   ${SCOUT_HOME}/workspace/             the agent's only writable folder
+#   ${SCOUT_HOME}/pgdata/                Postgres data (only the db container sees it)
+#   ${SCOUT_HOME}/secrets/db-admin.env   Postgres superuser password (db only)
+#   ${SCOUT_HOME}/secrets/db-roles.env   passwords for the four scout_* roles
+#                                        (made by ops/db/make-secrets.sh)
+#
+# The agent is on the default network and can't reach the database: db and scout
+# share a separate "data" network. The agent gets database access only in Phase 3.
 #
 # The agent never starts on `docker compose up`; sessions are started by
 # agent/run-session.sh with `docker compose run`.
@@ -75,3 +85,68 @@ services:
       GIT_COMMITTER_NAME: Scout Agent
       GIT_COMMITTER_EMAIL: scout-agent@localhost
       SCOUT_GUARD_LOG: /workspace/.scout-logs/guard.log
+
+  # --- Phase 1: database and scouting code (docs/phase1-plan.md) ---
+
+  db:
+    # Postgres 18 keeps its data under /var/lib/postgresql/18/docker, so the host
+    # folder is mounted one level up (not at .../data as in older guides).
+    image: postgres:18
+    profiles: ["scout"]
+    restart: unless-stopped
+    env_file:
+      - path: ${SCOUT_HOME:-/srv/scout}/secrets/db-admin.env
+        required: true
+      - path: ${SCOUT_HOME:-/srv/scout}/secrets/db-roles.env
+        required: true
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      SCOUT_DB_NAME: scout
+    volumes:
+      - ${SCOUT_HOME:-/srv/scout}/pgdata:/var/lib/postgresql
+      # Runs once, on an empty data folder: database, schema and the four roles.
+      - ./ops/db/initdb:/docker-entrypoint-initdb.d:ro
+    # Localhost only: reach it from Windows through an SSH tunnel (plan §8).
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks: [data]
+    security_opt:
+      - no-new-privileges:true
+    shm_size: 256m
+    mem_limit: 1g
+    healthcheck:
+      # Over TCP on purpose: during first-time setup Postgres only listens on its
+      # socket, so this stays "starting" until the roles and database exist.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d scout"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  scout:
+    build:
+      context: .
+      target: runtime
+    image: scout-runtime:dev
+    profiles: ["scout"]
+    user: "10002:10002"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m
+    mem_limit: 512m
+    env_file:
+      - path: ${SCOUT_HOME:-/srv/scout}/secrets/db-roles.env
+        required: true
+    environment:
+      SCOUT_DB_HOST: db
+    networks: [data]
+    depends_on:
+      db:
+        condition: service_healthy
+
+networks:
+  data: {}
