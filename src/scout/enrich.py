@@ -32,7 +32,7 @@ from types import SimpleNamespace
 import psycopg
 from psycopg.types.json import Jsonb
 
-from scout import store
+from scout import store, trust
 from scout.config import SearchConfig
 from scout.pipeline import classify
 from scout.pipeline.links import canonical_url
@@ -78,6 +78,7 @@ class EnrichStats:
     not_found: list[str] = field(default_factory=list)
     boards: list[BoardStats] = field(default_factory=list)
     dup_groups: int = 0
+    suspicious: int = 0
 
 
 def ats_area(bp: BoardPosting, metro) -> str:
@@ -366,6 +367,7 @@ def enrich(
         ok = sum(1 for b in stats.boards if b.outcome in ("ok", "empty"))
         with conn.transaction():
             stats.dup_groups = store.regroup(conn).dup_groups
+            stats.suspicious, _ = trust.rescore(conn)
             conn.execute(
                 "UPDATE scout_runs SET finished_at = now(), ok = %s, terms_ok = %s,"
                 " terms_failed = %s, notes = %s WHERE id = %s",
@@ -413,6 +415,8 @@ def report(stats: EnrichStats, out=print, dry_run: bool = False) -> None:
             f" missed {sum(b.missed for b in stats.boards)},"
             f" removed {sum(b.removed for b in stats.boards)}"
         )
+    if not dry_run:
+        out(f"  suspicious postings (trust score below 0): {stats.suspicious}; see v_suspicious")
     failed = [b for b in stats.boards if b.outcome not in ("ok", "empty")]
     if failed:
         out(f"  boards that failed: {len(failed)} (see v_source_health)")

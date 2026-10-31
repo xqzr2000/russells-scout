@@ -353,6 +353,11 @@ everything "seen again", `not seen this time: 0`.
 Likely duplicates (the same job under two WorkBC listings, employer-name variants or
 different sites) share a `dup_group_id`; nothing is merged or deleted. See `v_duplicates`.
 
+Every posting gets a trust score with its reasons, e.g. `{"+2 ats_board:ashby","+1 confirmed_on_board"}`.
+Red flags (fees, SIN or bank details, cheque-cashing or reshipping duties, chat-app or free-email
+contact, impossible pay, no employer name) push it below 0; those are listed in `v_suspicious`.
+Nothing is hidden or deleted because of its score.
+
 How closing jobs are handled: a posting is counted as "missed" only after a sweep in which
 every term succeeded. After 3 misses in a row it becomes `removed`; it is never deleted, and
 it comes back as `reappeared` if WorkBC lists it again. `--term` runs and failed sweeps never
@@ -369,6 +374,8 @@ q "SELECT ats, count(*) FROM postings GROUP BY 1 ORDER BY 2 DESC"
 q "SELECT title, employer, city FROM v_review"
 q "SELECT * FROM v_source_health"
 q "SELECT dup_group_id, title, employer, jump_url FROM v_duplicates"
+q "SELECT title, employer, trust_score, trust_reasons, jump_url FROM v_suspicious"
+q "SELECT trust_score, count(*) FROM postings GROUP BY 1 ORDER BY 1"
 q "SELECT id, started_at, ok, terms_ok, terms_failed FROM scout_runs ORDER BY id DESC LIMIT 5"
 ```
 

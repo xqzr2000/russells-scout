@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from itertools import pairwise
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from itertools import pairwise
 
 TITLE_WINDOW = timedelta(days=30)
 

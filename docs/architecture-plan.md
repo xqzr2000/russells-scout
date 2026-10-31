@@ -272,6 +272,12 @@ Each listing gets a trust score and the reasons for it, computed by plain code w
 - Vague or unfindable company; lookalike domain.
 - Cheque-cashing, reshipping or crypto-transfer duties.
 
+**Scoring** (Phase 1, `src/scout/trust.py`): known job board +2, Job Bank +2, employer's own domain
++2, confirmed on the employer's board +1; fees −5, SIN/bank/ID −4, money-mule duties −5,
+chat-app contact −4, free-email contact −2, pay over $500k a year or $250 an hour −2, no
+employer name −2, board name unrelated to the employer −1. Below 0 is suspicious. Lookalike
+domains are not checked yet.
+
 **Handling**
 - Flag, don't delete: suspicious listings stay in the database with `trust_score` and `trust_reasons`, visible in a view and the digest.
 - Optional later: a free domain-reputation check (e.g. Google Safe Browsing) as an extra signal.
