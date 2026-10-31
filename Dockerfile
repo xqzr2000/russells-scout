@@ -67,7 +67,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     VIRTUAL_ENV=/opt/venv \
     PATH=/opt/venv/bin:$PATH \
-    SCOUT_MIGRATIONS_DIR=/app/migrations
+    SCOUT_MIGRATIONS_DIR=/app/migrations \
+    SCOUT_CONFIG=/app/config/search.json
 
 RUN python -m venv /opt/venv
 
@@ -78,6 +79,7 @@ RUN pip install -r /tmp/requirements-runtime.txt
 COPY pyproject.toml /app/
 COPY src /app/src
 COPY migrations /app/migrations
+COPY config /app/config
 RUN pip install --no-deps /app \
     && useradd --uid 10002 --no-create-home --shell /usr/sbin/nologin scout
 

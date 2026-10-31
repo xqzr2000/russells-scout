@@ -1,0 +1,64 @@
+{
+  "result": [
+    {
+      "JobId": "cmexample0001aaaaaaaaaaaaa",
+      "Title": "Senior Data Scientist",
+      "DatePosted": "2026-10-27T00:00:00+00:00",
+      "ExpireDate": "2027-01-25T00:00:00+00:00",
+      "EmployerName": "Northwind Analytics Inc.",
+      "Location": [],
+      "City": "Vancouver",
+      "IsFederalJob": false,
+      "LastUpdated": "2026-10-27T00:00:00+00:00",
+      "Noc2021": "21211",
+      "SalarySummary": "$140,000 to $170,000 annually",
+      "Views": 12,
+      "IsNew": true,
+      "ExternalSource": {
+        "Source": [
+          {"Source": "jobs.ashbyhq.com", "Url": "https://jobs.ashbyhq.com/northwind/11111111-2222-3333-4444-555555555555"}
+        ]
+      }
+    },
+    {
+      "JobId": "50000001",
+      "Title": "data engineer",
+      "DatePosted": "2026-10-21T16:07:00+00:00",
+      "ExpireDate": "2026-11-04T16:07:00+00:00",
+      "EmployerName": "Example Consulting Ltd",
+      "Location": [],
+      "City": "Virtual job based in Toronto, ON",
+      "HoursOfWork": {"Description": ["Full-time"]},
+      "PeriodOfEmployment": {"Description": ["Permanent"]},
+      "IsFederalJob": true,
+      "LastUpdated": "2026-10-21T16:07:00+00:00",
+      "Noc2021": "",
+      "SalarySummary": "$90,000 to $110,000 annually (to be negotiated)",
+      "Views": 40,
+      "IsNew": false,
+      "WorkplaceType": {"Id": 15141, "Description": "Virtual job"}
+    },
+    {
+      "JobId": "cmexample0003ccccccccccccc",
+      "Title": "Machine Learning Engineer (Remote - CAN)",
+      "DatePosted": "2026-10-20T00:00:00+00:00",
+      "ExpireDate": "2027-01-18T00:00:00+00:00",
+      "EmployerName": "Contoso Labs",
+      "Location": [],
+      "City": "British Columbia",
+      "IsFederalJob": false,
+      "LastUpdated": "2026-10-20T00:00:00+00:00",
+      "Noc2021": "21211",
+      "Views": 3,
+      "IsNew": false,
+      "ExternalSource": {
+        "Source": [
+          {"Source": "jobs.lever.co", "Url": "https://jobs.lever.co/contoso/abcdef12-3456-7890-abcd-ef1234567890"}
+        ]
+      }
+    }
+  ],
+  "count": 3,
+  "pageNumber": 1,
+  "pageSize": 50
+}

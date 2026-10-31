@@ -5,6 +5,9 @@
   scout db migrate    Apply new migrations/ files to Postgres (as scout_migrate).
   scout db status     List applied and pending migrations.
   scout db check      Connect as each role and check what it can and can't do.
+  scout sweep --dry-run [--term T ...] [--no-save]
+                      Search WorkBC for every term in config/search.json and print a
+                      summary; nothing is written to the database yet.
 
 Add --show-browser to either command to run Chromium with a visible window
 (only works where there's a display, i.e. not in Codespaces).
@@ -91,10 +94,21 @@ def main(argv: list[str] | None = None) -> int:
     p_db = sub.add_parser("db", help="database: migrate, status, check")
     p_db.add_argument("action", choices=["migrate", "status", "check"])
 
+    p_sweep = sub.add_parser("sweep", help="search WorkBC for every configured term")
+    p_sweep.add_argument("--dry-run", action="store_true", help="fetch and summarize only")
+    p_sweep.add_argument(
+        "--term", action="append", dest="terms", help="only this term (repeatable)"
+    )
+    p_sweep.add_argument("--no-save", action="store_true", help="don't save raw responses")
+
     args = parser.parse_args(argv)
 
     if args.command == "db":
         return run_db(args.action)
+    if args.command == "sweep":
+        from scout import sweep
+
+        return sweep.run(args.dry_run, terms=args.terms, save_raw=not args.no_save)
     headless = not args.show_browser
 
     if args.command == "smoke":

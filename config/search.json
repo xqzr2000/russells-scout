@@ -1,0 +1,29 @@
+{
+  "terms": [
+    "data scientist",
+    "data science",
+    "data analyst",
+    "business data analyst",
+    "data engineer",
+    "machine learning",
+    "ML engineer",
+    "AI engineer",
+    "artificial intelligence",
+    "quantitative analyst"
+  ],
+  "area": {
+    "metro": [
+      "Vancouver", "Burnaby", "Richmond", "Surrey", "Coquitlam", "Port Coquitlam",
+      "Port Moody", "New Westminster", "North Vancouver", "West Vancouver", "Delta",
+      "Langley", "Township of Langley", "Maple Ridge", "Pitt Meadows", "White Rock",
+      "Anmore", "Belcarra", "Bowen Island", "Lions Bay", "Tsawwassen", "UBC"
+    ],
+    "include_remote": true,
+    "keep_other_bc": true
+  },
+  "sweep": {
+    "page_size": 50,
+    "max_pages_per_term": 10,
+    "delay_seconds": 1
+  }
+}
