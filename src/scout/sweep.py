@@ -13,15 +13,19 @@ Raw responses are saved in both live modes.
 
 Raw responses go to $SCOUT_RAW_DIR/sweep-<time>/ when that variable is set (the scout
 container sets it to /data/workbc-raw, which is $SCOUT_RAW_DIR_HOST =
-/srv/scout/logs/workbc on the box; the summary prints the box path).
+/srv/scout/logs/workbc on the box; the summary prints the box path). Folders older than
+RAW_KEEP_DAYS are deleted after each live sweep.
+
+Only one sweep or enrichment runs at a time (db.try_run_lock); a second one is skipped.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import time
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from scout import config, db, enrich, store, trust
@@ -30,14 +34,31 @@ from scout.pipeline.record import PostingRecord, build
 from scout.sources import workbc
 
 PUBLIC_API_ATS = ("ashby", "greenhouse", "lever")
+RAW_KEEP_DAYS = 30
+RAW_STAMP = "%Y%m%d-%H%M%SZ"
 
 
 def raw_dir_for_run(now: datetime | None = None) -> Path | None:
     base = os.environ.get("SCOUT_RAW_DIR")
     if not base:
         return None
-    stamp = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%SZ")
+    stamp = (now or datetime.now(UTC)).strftime(RAW_STAMP)
     return Path(base) / f"sweep-{stamp}"
+
+
+def prune_raw(base: Path, now: datetime | None = None, keep_days: int = RAW_KEEP_DAYS) -> int:
+    """Delete sweep-<time> folders older than keep_days; returns how many. Other names stay."""
+    cutoff = (now or datetime.now(UTC)) - timedelta(days=keep_days)
+    removed = 0
+    for folder in sorted(base.glob("sweep-*")):
+        try:
+            when = datetime.strptime(folder.name[len("sweep-") :], RAW_STAMP).replace(tzinfo=UTC)
+        except ValueError:
+            continue
+        if folder.is_dir() and when < cutoff:
+            shutil.rmtree(folder, ignore_errors=True)
+            removed += 1
+    return removed
 
 
 def shown_path(path: Path) -> str:
@@ -195,6 +216,10 @@ def run(
         except db.DbError as e:
             out(f"ERROR: {e}")
             return 1
+        if not db.try_run_lock(conn):
+            conn.close()
+            out("Another sweep or enrichment is running; this one is skipped.")
+            return 0
 
     raw_dir = raw_dir_for_run() if save_raw else None
     delay = cfg.sweep.delay_seconds
@@ -225,6 +250,10 @@ def run(
     records = [build(job, result.matched_terms[jid], cfg) for jid, job in result.jobs.items()]
     out("")
     summarize(result, records, out, replayed=bool(replay))
+    if raw_dir is not None:
+        pruned = prune_raw(raw_dir.parent)
+        if pruned:
+            out(f"raw responses older than {RAW_KEEP_DAYS} days deleted: {pruned} sweep(s)")
 
     if conn is not None:
         with conn:

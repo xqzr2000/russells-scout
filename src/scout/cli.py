@@ -164,6 +164,10 @@ def run_enrich(dry_run: bool, boards: list[str] | None) -> int:
     except (config.ConfigError, db.DbError) as e:
         print(f"ERROR: {e}")
         return 1
+    if not dry_run and not db.try_run_lock(conn):
+        conn.close()
+        print("Another sweep or enrichment is running; this one is skipped.")
+        return 0
     with conn:
         stats = enrich.enrich(conn, cfg, dry_run=dry_run, only=boards)
     enrich.report(stats, dry_run=dry_run)

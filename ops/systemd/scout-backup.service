@@ -1,0 +1,15 @@
+# Installed by ops/systemd/install.sh, which fills in @USER@ and @SCOUT_HOME@.
+[Unit]
+Description=Scout: back up the database and check the backup restores
+Documentation=file://@SCOUT_HOME@/code/docs/box-setup.md
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@SCOUT_HOME@/code
+Environment=SCOUT_HOME=@SCOUT_HOME@
+TimeoutStartSec=30min
+Nice=10
+ExecStart=/bin/bash @SCOUT_HOME@/code/ops/backup.sh
