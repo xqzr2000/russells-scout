@@ -380,7 +380,8 @@ from step 12 and the `scout_reader` password.)
 For postings whose link goes to an Ashby, Greenhouse or Lever board, Scout reads the board
 itself (one request per board, one a second; no key needed). It adds the description, pay
 range (Ashby and Lever) and remote/hybrid/onsite to those postings, and also saves other jobs
-on the same boards that match a search term and are in Metro Vancouver or remote in Canada.
+on the same boards that match a search term (all its words in the title, as WorkBC's search
+does) and are in Metro Vancouver or remote in Canada.
 Greenhouse links on a company's own site (`?gh_jid=`) don't name the board: Scout tries a few
 names made from the employer's name and keeps the one where that exact job exists.
 

@@ -11,8 +11,9 @@
    affects the others):
      - WorkBC postings found on the board get its description, pay range, workplace and
        location (`enriched_at` set);
-     - other postings on the board that match a search term (all its words in the title)
-       and are in Metro Vancouver or remote in Canada are saved with found_via = 'ats'
+     - other postings on the board that match a search term (all its words in the title, as
+       WorkBC's search does) and are in Metro Vancouver or remote in Canada are saved with
+       found_via = 'ats'
        (`new` / `reappeared` / `changed` events, like a sweep);
      - board-found postings no longer on a board that answered are counted as missed and
        removed after 3 misses.
@@ -39,12 +40,15 @@ from scout.sources import ats as ats_api
 from scout.sources.ats import BoardPosting, BoardResult
 
 BOARD_RECHECK = "7 days"
-_ELSEWHERE = re.compile(
-    r"\b(us|usa|u\.s\.|united states|uk|united kingdom|europe|emea|apac|latam|india|germany"
-    r"|ireland|france|spain|netherlands|poland|australia|new zealand|mexico|brazil|argentina"
-    r"|philippines|singapore|japan|israel)\b"
+# Remote jobs count only in Canada: the location names Canada or a province or city in it,
+# or says nothing but "remote" (and the board gives no other country).
+_CANADA = re.compile(
+    r"\b(canada|canadian|bc|b\.c\.|british columbia|vancouver|alberta|ontario|quebec|québec"
+    r"|manitoba|saskatchewan|nova scotia|new brunswick|newfoundland|prince edward island|yukon"
+    r"|nunavut|northwest territories|toronto|montreal|montréal|calgary|ottawa|edmonton"
+    r"|winnipeg|halifax)\b"
 )
-_CANADA = re.compile(r"\b(canada|bc|b\.c\.|british columbia|vancouver)\b")
+_JUST_REMOTE = re.compile(r"\b(remote|anywhere|worldwide|global|distributed|work from home|wfh)\b")
 
 
 @dataclass
@@ -86,11 +90,9 @@ def ats_area(bp: BoardPosting, metro) -> str:
         return "outside"
     if _CANADA.search(loc):
         return "remote"
-    if _ELSEWHERE.search(loc):
-        return "outside"
-    if bp.country and bp.country.casefold() not in ("ca", "can", "canada"):
-        return "outside"
-    return "remote"
+    leftover = re.sub(r"[^a-z]+", " ", _JUST_REMOTE.sub(" ", loc)).strip()
+    country_ok = not bp.country or bp.country.casefold() in ("ca", "can", "canada")
+    return "remote" if not leftover and country_ok else "outside"
 
 
 def _keep_area(area: str, cfg: SearchConfig) -> bool:
