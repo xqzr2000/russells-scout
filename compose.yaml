@@ -145,6 +145,7 @@ services:
     environment:
       SCOUT_DB_HOST: db
       SCOUT_RAW_DIR: /data/workbc-raw
+      SCOUT_RAW_DIR_HOST: ${SCOUT_HOME:-/srv/scout}/logs/workbc   # for messages only
     volumes:
       # The only host folder it can write: raw sweep responses, for debugging.
       - ${SCOUT_HOME:-/srv/scout}/logs/workbc:/data/workbc-raw

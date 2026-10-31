@@ -5,9 +5,10 @@
   scout db migrate    Apply new migrations/ files to Postgres (as scout_migrate).
   scout db status     List applied and pending migrations.
   scout db check      Connect as each role and check what it can and can't do.
-  scout sweep --dry-run [--term T ...] [--no-save]
-                      Search WorkBC for every term in config/search.json and print a
-                      summary; nothing is written to the database yet.
+  scout sweep --dry-run [--term T ...] [--no-save] [--replay SWEEP]
+                      Search WorkBC for every term in config/search.json, classify the
+                      postings and print a summary; nothing is written to the database
+                      yet. --replay re-runs the rules on a saved sweep, offline.
 
 Add --show-browser to either command to run Chromium with a visible window
 (only works where there's a display, i.e. not in Codespaces).
@@ -100,6 +101,9 @@ def main(argv: list[str] | None = None) -> int:
         "--term", action="append", dest="terms", help="only this term (repeatable)"
     )
     p_sweep.add_argument("--no-save", action="store_true", help="don't save raw responses")
+    p_sweep.add_argument(
+        "--replay", metavar="SWEEP", help="use a saved sweep (e.g. sweep-20261031-065758Z)"
+    )
 
     args = parser.parse_args(argv)
 
@@ -108,7 +112,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "sweep":
         from scout import sweep
 
-        return sweep.run(args.dry_run, terms=args.terms, save_raw=not args.no_save)
+        return sweep.run(
+            args.dry_run, terms=args.terms, save_raw=not args.no_save, replay=args.replay
+        )
     headless = not args.show_browser
 
     if args.command == "smoke":

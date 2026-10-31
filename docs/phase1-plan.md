@@ -1,6 +1,6 @@
 # Phase 1 plan: WorkBC-first scouting slice
 
-Status: **in progress**. 1.1 (database) done: `scout db check` 49/49 on the box (PostgreSQL 18.6, 2026-10-30). 1.2 (search settings) and 1.3 (WorkBC client, `scout sweep --dry-run`) built 2026-10-30. Plan: [architecture-plan.md](architecture-plan.md) §9 and §13.
+Status: **in progress**. 1.1 (database) done: `scout db check` 49/49 on the box (PostgreSQL 18.6, 2026-10-30). 1.2 (search settings) and 1.3 (WorkBC client) done: first live dry run 2026-10-31, 177 postings, all 10 terms complete. 1.4 (area, workplace, title match) and 1.5 (link classifier, employer names) built 2026-10-31. Plan: [architecture-plan.md](architecture-plan.md) §9 and §13.
 Zero LLM tokens: everything here is plain code that runs on a timer from Phase 2 on.
 
 ## 1. What WorkBC gives us (probe on the box, 2026-10-30)
@@ -173,6 +173,9 @@ plan §8. Postgres runs in a container on the box, listening on localhost only, 
   search and risk missing real matches, every posting is kept and marked `exact` or `loose`.
   Exact matches are what the digest leads with; loose ones go to `v_review` to check by eye. After
   a few weeks of results, we tune the terms. This also starts the "similar jobs" idea for Phase 4.
+  Because "machine learning" and "artificial intelligence" are terms themselves and "ML"/"AI"
+  count as the same words, any title containing "ML" or "AI" is an exact match (2026-10-31).
+  If that proves too broad, those two terms can be made search-only (not used for exact).
 - **Workday waits for the agent.** Workday is the largest group (21%), but WorkBC already gives us
   the title, employer, city and link for those postings. Workday has no official public API, and
   its unofficial one is the kind of moving target the agent is meant to handle. It becomes the
@@ -189,9 +192,9 @@ plan §8. Postgres runs in a container on the box, listening on localhost only, 
 |---|---|---|
 | 1.1 | Postgres service in `compose.yaml` (profile `scout`), `/srv/scout/pgdata`, first migration, roles, views | `scout db check` connects as each role; `scout_reader` can't write. **Done** 2026-10-30: [box-setup.md §12](box-setup.md#12-database-phase-1-box-once) |
 | 1.2 | `config/search.json` + loader with validation | bad config fails with a clear message. **Built**: `src/scout/config.py` |
-| 1.3 | WorkBC client: request body, paging, per-term success, raw-response saving, polite delay | unit tests on synthetic fixtures (paging, empty term, malformed response). **Built**: `src/scout/sources/workbc.py`, `scout sweep --dry-run` ([box-setup.md §13](box-setup.md#13-first-workbc-sweep-dry-run-phase-1-box)) |
-| 1.4 | Area, workplace and title-match rules | table-driven tests, including every city and remote case in §1 |
-| 1.5 | Link classifier and employer normalizer | one test per row of the table in §3 step 5 |
+| 1.3 | WorkBC client: request body, paging, per-term success, raw-response saving, polite delay | unit tests on synthetic fixtures (paging, empty term, malformed response). **Done** 2026-10-31: `src/scout/sources/workbc.py`, `scout sweep --dry-run` ([box-setup.md §13](box-setup.md#13-first-workbc-sweep-dry-run-phase-1-box)) |
+| 1.4 | Area, workplace and title-match rules | table-driven tests, including every city and remote case in §1. **Built**: `src/scout/pipeline/classify.py` |
+| 1.5 | Link classifier and employer normalizer | one test per row of the table in §3 step 5. **Built**: `src/scout/pipeline/links.py`, records in `pipeline/record.py`; the dry-run summary shows both; `--replay` re-runs them on a saved sweep |
 | 1.6 | Upsert, events, change detection, removal safety | rerun on the same fixture → no new rows; failed term → nothing marked missed |
 | 1.7 | Duplicate grouping | the Activision case (3 names, 3 links, 1 requisition) lands in one group |
 | 1.8 | Ashby, Greenhouse, Lever enrichment | synthetic board fixtures; a failing board doesn't stop the sweep |
