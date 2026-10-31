@@ -100,6 +100,17 @@ def run(out=print, limit: int = 10) -> int:
             out(f"  #{rid} {started} {kind:6} {result:7} {what} ok {t_ok}, failed {t_failed}"
                 + (f"  ({notes})" if notes else ""))  # fmt: skip
 
+        last_digest = one(
+            "SELECT to_char(sent_at AT TIME ZONE %s, 'YYYY-MM-DD HH24:MI'), new_relevant,"
+            " problems FROM digests ORDER BY id DESC LIMIT 1",
+            tz,
+        )
+        if last_digest:
+            when, new, problems = last_digest
+            out(f"  last digest sent {when}: {new} new job(s), {problems} problem(s)")
+        else:
+            out("  no digest sent yet")
+
         trouble = rows(
             "SELECT name, status, consecutive_failures, last_outcome, last_error"
             " FROM v_source_health WHERE status <> 'active' OR consecutive_failures > 0"

@@ -1,0 +1,11 @@
+# Installed by ops/systemd/install.sh.
+[Unit]
+Description=Scout: digest email every morning, after the 06:40 sweep
+
+[Timer]
+OnCalendar=*-*-* 07:10:00 America/Vancouver
+Persistent=true
+RandomizedDelaySec=1min
+
+[Install]
+WantedBy=timers.target

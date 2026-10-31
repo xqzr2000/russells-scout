@@ -1,6 +1,6 @@
 # Phase 2 plan: runs on its own, daily digest, backups, sync
 
-Status: **in progress** (2026-10-31). 2.1 and 2.2 built. Email: a Gmail account (§5).
+Status: **in progress** (2026-10-31). 2.1 and 2.2 done on the box; 2.3 and 2.4 built. Email: a Gmail account (§5).
 Architecture plan: [architecture-plan.md](architecture-plan.md) §7, §10, §11, §13.
 Still zero LLM tokens: nothing in Phase 2 involves the agent.
 
@@ -39,7 +39,8 @@ WorkBC requests and 50 job-board requests a day.
    prints that it was skipped and exits. systemd never starts a timer's job twice at once.
 3. **Email credentials only in the digest container.** A new `digest` service uses the same image
    but:
-   - logs in to the database as `scout_reader`;
+   - reads the database as `scout_reader`, and records each sent digest as `scout_ingest`
+     (the only write it makes);
    - is the only service given `/srv/scout/secrets/mail.env`;
    - takes the recipient from `mail.env`, never from config or the database.
 
@@ -73,7 +74,9 @@ WorkBC requests and 50 job-board requests a day.
 ## 3. The digest
 
 One email a day, plain text with a simple HTML version. WorkBC data stays private: it goes only
-to your own address.
+to your own address. Suspicious postings appear only in their own section, never among the new
+jobs. The digest reads the backup status from `/srv/scout/logs/backup-status` (a copy
+`ops/backup.sh` writes, since the container can't see into the backups folder).
 
 ```
 Subject: Scout: 6 new jobs, 0 suspicious (Sat Oct 31)
@@ -109,15 +112,15 @@ HEALTH
 
 | Task | What | Done when |
 |---|---|---|
-| 2.1 | **Timers:** `ops/systemd/` units for sweep and backup (digest and health join in 2.3 and 2.5); `ops/systemd/install.sh`; the run lock; raw-file pruning | `systemctl list-timers 'scout-*'` shows the next runs; a sweep runs by timer and shows in `scout status`. **Built** |
-| 2.2 | **Backups:** `ops/backup.sh` (dump, restore check, keep 14 daily + 8 weekly) | a dump in `/srv/scout/backups`; the restore check passes; a broken dump is reported as failed. **Built** |
-| 2.3 | **Digest:** migration 0005 (`digests`); `scout digest [--dry-run]`; `digest` service in compose | `--dry-run` on the box shows the real jobs; tests cover "since last digest", empty days and a failed send |
-| 2.4 | **Email:** `mail.env`, `smtplib` sender, `scout digest --test-email` | a test email arrives in your inbox |
+| 2.1 | **Timers:** `ops/systemd/` units for sweep and backup (digest and health join in 2.3 and 2.5); `ops/systemd/install.sh`; the run lock; raw-file pruning | `systemctl list-timers 'scout-*'` shows the next runs; a sweep runs by timer and shows in `scout status`. **Done** (2026-10-31) |
+| 2.2 | **Backups:** `ops/backup.sh` (dump, restore check, keep 14 daily + 8 weekly) | a dump in `/srv/scout/backups`; the restore check passes; a broken dump is reported as failed. **Done** (2026-10-31: 181 postings restored) |
+| 2.3 | **Digest:** migration 0005 (`digests`); `scout digest [--dry-run]`; `digest` service in compose; `scout-digest.timer` | `--dry-run` on the box shows the real jobs; tests cover "since last digest", empty days and a failed send. **Built** |
+| 2.4 | **Email:** `mail.env` (`ops/mail/make-mail-env.sh`), `smtplib` sender, `scout digest --test-email` | a test email arrives in your inbox. **Built** |
 | 2.5 | **Health alerts:** `scout health` (last good sweep, DB reachable), at most every 12 hours | stopping the db container produces one alert email, and no second one within 12 hours |
 | 2.6 | **WSL2 sync:** the restricted key on the box (`ops/sync/`), the pull script for WSL2, Task Scheduler steps | backups appear in WSL2; the key can't open a shell; the digest shows the sync time |
 | 2.7 | **A week unattended** and `docs/phase2-results.md` | 7 digests in a row; no missed sweeps; backups and sync current |
 
-Each task is one PR, as in Phase 1 (2.1 and 2.2 share one).
+Each task is one PR, as in Phase 1 (2.1 with 2.2, and 2.3 with 2.4, share one).
 
 ## 5. Email account: Gmail (decided 2026-10-31)
 

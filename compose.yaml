@@ -5,6 +5,7 @@
 #   db     PostgreSQL (profile "scout"), always on, localhost only
 #   scout  the scouting code (profile "scout"), run one command at a time:
 #            docker compose --profile scout run --rm scout db check
+#   digest the daily email (profile "scout"), same image, started by a timer
 #
 # Host folders live under SCOUT_HOME (default /srv/scout):
 #   ${SCOUT_HOME}/secrets/deepseek.env   your DeepSeek key (mode 600, never in git)
@@ -15,6 +16,8 @@
 #   ${SCOUT_HOME}/secrets/db-admin.env   Postgres superuser password (db only)
 #   ${SCOUT_HOME}/secrets/db-roles.env   passwords for the four scout_* roles
 #                                        (made by ops/db/make-secrets.sh)
+#   ${SCOUT_HOME}/secrets/mail.env       Gmail address and app password (digest only;
+#                                        made by ops/mail/make-mail-env.sh)
 #
 # The agent is on the default network and can't reach the database: db and scout
 # share a separate "data" network. The agent gets database access only in Phase 3.
@@ -149,6 +152,38 @@ services:
     volumes:
       # The only host folder it can write: raw sweep responses, for debugging.
       - ${SCOUT_HOME:-/srv/scout}/logs/workbc:/data/workbc-raw
+    networks: [data]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # The daily digest email (Phase 2). Same image as scout; the only service that gets the
+  # email password. Reads Scout's logs folder (backup status, sync time) read-only.
+  #   docker compose --profile scout run --rm digest digest --dry-run
+  digest:
+    image: scout-runtime:dev          # built by `docker compose --profile scout build scout`
+    pull_policy: never
+    profiles: ["scout"]
+    user: "10002:10002"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m
+    mem_limit: 256m
+    env_file:
+      - path: ${SCOUT_HOME:-/srv/scout}/secrets/db-roles.env
+        required: true
+      # Not required, so the other services work before it exists; `scout digest` says
+      # what's missing.
+      - path: ${SCOUT_HOME:-/srv/scout}/secrets/mail.env
+        required: false
+    environment:
+      SCOUT_DB_HOST: db
+      SCOUT_LOGS_DIR: /data/logs
+    volumes:
+      - ${SCOUT_HOME:-/srv/scout}/logs:/data/logs:ro
     networks: [data]
     depends_on:
       db:
