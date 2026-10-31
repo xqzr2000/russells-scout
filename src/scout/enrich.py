@@ -16,7 +16,7 @@
        found_via = 'ats'
        (`new` / `reappeared` / `changed` events, like a sweep);
      - board-found postings no longer on a board that answered are counted as missed and
-       removed after 3 misses.
+       removed after 3 misses and 24 hours unseen.
 4. Duplicate groups are recomputed.
 
 `--dry-run` reads as scout_reader and writes nothing.
@@ -269,12 +269,12 @@ def _mark_board_missed(conn, res: BoardResult, run_id: int, bs) -> None:
         UPDATE postings SET missed_runs = missed_runs + 1
         WHERE found_via = 'ats' AND status = 'active' AND ats = %s AND ats_board = %s
           AND NOT (ats_posting_id = ANY(%s))
-        RETURNING id, missed_runs
+        RETURNING id, missed_runs, last_seen_at <= now() - %s::interval
         """,
-        (res.ats, res.board, on_board),
+        (res.ats, res.board, on_board, store.UNSEEN_BEFORE_REMOVED),
     ).fetchall()
     bs.missed = len(missed)
-    gone = [pid for pid, misses in missed if misses >= store.MISSES_BEFORE_REMOVED]
+    gone = [pid for pid, misses, stale in missed if misses >= store.MISSES_BEFORE_REMOVED and stale]
     if gone:
         conn.execute("UPDATE postings SET status = 'removed' WHERE id = ANY(%s)", (gone,))
         for pid in gone:

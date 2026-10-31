@@ -359,11 +359,18 @@ contact, impossible pay, no employer name) push it below 0; those are listed in 
 Nothing is hidden or deleted because of its score.
 
 How closing jobs are handled: a posting is counted as "missed" only after a sweep in which
-every term succeeded. After 3 misses in a row it becomes `removed`; it is never deleted, and
+every term succeeded. After 3 misses in a row, once it has also been unseen for 24 hours, it
+becomes `removed`; it is never deleted, and
 it comes back as `reappeared` if WorkBC lists it again. `--term` runs and failed sweeps never
 count anything as missed.
 
-Look at the data with the read-only role, inside the db container:
+For a summary without SQL (counts, recent runs, problems, newest relevant jobs):
+
+```bash
+docker compose --profile scout run --rm scout status
+```
+
+Or look at the data with the read-only role, inside the db container:
 
 ```bash
 cd /srv/scout/code

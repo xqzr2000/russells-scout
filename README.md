@@ -12,7 +12,7 @@ Full design: [docs/architecture-plan.md](docs/architecture-plan.md) (v3.2).
 | Phase | What | Status |
 |---|---|---|
 | 0 | Claude Code on DeepSeek in a hardened container on the box; locked rules; smoke tests; capability tests | **done: GO** (2026-10-29). 26/26 smoke, capability tests 3/3 on repair and operator; `deepseek-flash` at low effort ([results](docs/phase0-results.md), [box setup](docs/box-setup.md)) |
-| 1 | Scouting slice: WorkBC job board search, Postgres, Ashby/Greenhouse/Lever enrichment, dedupe, trust scoring (zero tokens) | **in progress**: 1.1–1.5 done (database; WorkBC search, 177 postings on 2026-10-31; classification); 1.6 saving sweeps done (177 postings saved, rerun adds nothing); 1.7 duplicate groups done; 1.8 job-board enrichment done; 1.9 trust scoring built ([Phase 1 plan](docs/phase1-plan.md), [box setup §12–15](docs/box-setup.md#12-database-phase-1-box-once)) |
+| 1 | Scouting slice: WorkBC job board search, Postgres, Ashby/Greenhouse/Lever enrichment, dedupe, trust scoring (zero tokens) | **done** (2026-10-31): 175 postings, 25 job boards, all exit criteria met ([results](docs/phase1-results.md), [box setup §12–15](docs/box-setup.md#12-database-phase-1-box-once)) |
 | 2 | Scout runtime, daily digest, WSL2 sync, backups | |
 | 3 | The agent takes over (sessions on a timer, `CLAUDE.md`, local git repo) | |
 | 4–5 | Discovery and long-run hardening | |
@@ -39,7 +39,7 @@ Crawl4AI stays for custom career pages later.
 | `src/scout/store.py` | Saving a sweep: postings, employers, events, missed and removed postings |
 | `src/scout/sources/ats.py`, `src/scout/enrich.py` | Ashby, Greenhouse and Lever boards: details for saved postings, matching jobs only on the boards |
 | `src/scout/trust.py` | Trust score and reasons for every posting (scam red flags) |
-| `docs/` | Architecture plan, box setup, Phase 0 results, Phase 1 plan |
+| `docs/` | Architecture plan, box setup, Phase 0 results, Phase 1 plan and results |
 | `src/scout/`, `tests/`, `Dockerfile`, `.devcontainer/` | crawl4ai scaffold (stage 1) |
 
 ## Agent on the Ubuntu box

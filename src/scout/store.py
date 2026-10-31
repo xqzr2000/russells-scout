@@ -13,7 +13,8 @@ For each posting in the sweep:
 
 Removal safety (plan §3 step 11, acceptance test 4): only after a *complete* sweep of
 *every* configured term is each active WorkBC posting that wasn't seen given
-missed_runs + 1; at 3 it becomes `removed` with a `removed` event. An incomplete sweep, or a
+missed_runs + 1; at 3, and once it has been unseen for 24 hours, it becomes `removed` with
+a `removed` event. An incomplete sweep, or a
 `--term` subset, marks nothing.
 
 Areas kept: metro and unknown always; remote if area.include_remote; other_bc and outside
@@ -38,6 +39,9 @@ from scout.sources.workbc import SweepResult
 WORKBC_SOURCE = "workbc"
 WORKBC_URL = "https://www.workbc.ca/find-job/search-jobs"
 MISSES_BEFORE_REMOVED = 3
+# ...and unseen at least this long, so a burst of runs (or a WorkBC hiccup during one)
+# can't remove a job within minutes. Seen live on 2026-10-31: three sweeps in 5 minutes.
+UNSEEN_BEFORE_REMOVED = "24 hours"
 WATCHED_FIELDS = ("title", "employer_name", "city", "salary_text")
 
 
@@ -201,12 +205,12 @@ def _mark_missed(
         UPDATE postings SET missed_runs = missed_runs + 1
         WHERE found_via = 'workbc' AND status = 'active'
           AND NOT (workbc_job_id = ANY(%s))
-        RETURNING id, missed_runs
+        RETURNING id, missed_runs, last_seen_at <= now() - %s::interval
         """,
-        (seen_ids,),
+        (seen_ids, UNSEEN_BEFORE_REMOVED),
     ).fetchall()
     stats.marked_missed = len(missed)
-    gone = [pid for pid, misses in missed if misses >= MISSES_BEFORE_REMOVED]
+    gone = [pid for pid, misses, stale in missed if misses >= MISSES_BEFORE_REMOVED and stale]
     if gone:
         conn.execute("UPDATE postings SET status = 'removed' WHERE id = ANY(%s)", (gone,))
         for pid in gone:

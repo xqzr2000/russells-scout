@@ -11,6 +11,7 @@
                       --dry-run writes nothing to the database; --replay (with
                       --dry-run) re-runs the rules on a saved sweep, offline. After
                       saving, the job boards are read too (--no-enrich to skip).
+  scout status        What's in the database: counts, recent runs, problems, newest jobs.
   scout enrich [--dry-run] [--board ATS:BOARD ...]
                       Read the Ashby, Greenhouse and Lever boards of saved postings:
                       details for those postings, plus matching jobs only on the boards.
@@ -113,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_sweep.add_argument("--no-enrich", action="store_true", help="don't read job boards after")
 
+    sub.add_parser("status", help="what's in the database, at a glance")
+
     p_enrich = sub.add_parser("enrich", help="read Ashby, Greenhouse and Lever boards")
     p_enrich.add_argument("--dry-run", action="store_true", help="report only; write nothing")
     p_enrich.add_argument(
@@ -139,6 +142,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "enrich":
         return run_enrich(args.dry_run, args.boards)
+    if args.command == "status":
+        from scout import status
+
+        return status.run()
     headless = not args.show_browser
 
     if args.command == "smoke":
