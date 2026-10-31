@@ -350,6 +350,9 @@ Same search and summary as the dry run, then a "saved to the database" section. 
 time, every posting is new. Run it again and nothing should change: `new 0, changed 0`,
 everything "seen again", `not seen this time: 0`.
 
+Likely duplicates (the same job under two WorkBC listings, employer-name variants or
+different sites) share a `dup_group_id`; nothing is merged or deleted. See `v_duplicates`.
+
 How closing jobs are handled: a posting is counted as "missed" only after a sweep in which
 every term succeeded. After 3 misses in a row it becomes `removed`; it is never deleted, and
 it comes back as `reappeared` if WorkBC lists it again. `--term` runs and failed sweeps never
@@ -365,6 +368,7 @@ q "SELECT area, match_quality, count(*) FROM postings GROUP BY 1, 2 ORDER BY 1, 
 q "SELECT ats, count(*) FROM postings GROUP BY 1 ORDER BY 2 DESC"
 q "SELECT title, employer, city FROM v_review"
 q "SELECT * FROM v_source_health"
+q "SELECT dup_group_id, title, employer, jump_url FROM v_duplicates"
 q "SELECT id, started_at, ok, terms_ok, terms_failed FROM scout_runs ORDER BY id DESC LIMIT 5"
 ```
 

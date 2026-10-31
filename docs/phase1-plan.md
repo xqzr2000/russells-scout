@@ -1,6 +1,6 @@
 # Phase 1 plan: WorkBC-first scouting slice
 
-Status: **in progress**. 1.1 (database) done: `scout db check` 49/49 on the box (PostgreSQL 18.6, 2026-10-30). 1.2 (search settings) and 1.3 (WorkBC client) done: first live dry run 2026-10-31, 177 postings, all 10 terms complete. 1.4 (area, workplace, title match) and 1.5 (link classifier, employer names) done: replayed on the box 2026-10-31 (167 metro, 6 remote, 4 other B.C.; 148 exact, 25 loose; 95 employers). 1.6 (saving to Postgres) built 2026-10-31. Plan: [architecture-plan.md](architecture-plan.md) §9 and §13.
+Status: **in progress**. 1.1 (database) done: `scout db check` 49/49 on the box (PostgreSQL 18.6, 2026-10-30). 1.2 (search settings) and 1.3 (WorkBC client) done: first live dry run 2026-10-31, 177 postings, all 10 terms complete. 1.4 (area, workplace, title match) and 1.5 (link classifier, employer names) done: replayed on the box 2026-10-31 (167 metro, 6 remote, 4 other B.C.; 148 exact, 25 loose; 95 employers). 1.6 (saving to Postgres) done: first save 2026-10-31, 177 new postings and 95 employers; the second run saved nothing new (`new 0, changed 0, seen again 177`). 1.7 (duplicate groups) built 2026-10-31. Plan: [architecture-plan.md](architecture-plan.md) §9 and §13.
 Zero LLM tokens: everything here is plain code that runs on a timer from Phase 2 on.
 
 ## 1. What WorkBC gives us (probe on the box, 2026-10-30)
@@ -199,8 +199,8 @@ plan §8. Postgres runs in a container on the box, listening on localhost only, 
 | 1.3 | WorkBC client: request body, paging, per-term success, raw-response saving, polite delay | unit tests on synthetic fixtures (paging, empty term, malformed response). **Done** 2026-10-31: `src/scout/sources/workbc.py`, `scout sweep --dry-run` ([box-setup.md §13](box-setup.md#13-first-workbc-sweep-dry-run-phase-1-box)) |
 | 1.4 | Area, workplace and title-match rules | table-driven tests, including every city and remote case in §1. **Done**: `src/scout/pipeline/classify.py` |
 | 1.5 | Link classifier and employer normalizer | one test per row of the table in §3 step 5. **Done**: `src/scout/pipeline/links.py`, records in `pipeline/record.py`; the dry-run summary shows both; `--replay` re-runs them on a saved sweep |
-| 1.6 | Upsert, events, change detection, removal safety | rerun on the same fixture → no new rows; failed term → nothing marked missed. **Built**: `src/scout/store.py`, `scout sweep` saves; migration 0002 ([box-setup.md §14](box-setup.md#14-save-sweeps-to-the-database-phase-1-box)) |
-| 1.7 | Duplicate grouping | the Activision case (3 names, 3 links, 1 requisition) lands in one group |
+| 1.6 | Upsert, events, change detection, removal safety | rerun on the same fixture → no new rows; failed term → nothing marked missed. **Done**: `src/scout/store.py`, `scout sweep` saves; migration 0002 ([box-setup.md §14](box-setup.md#14-save-sweeps-to-the-database-phase-1-box)) |
+| 1.7 | Duplicate grouping | the Activision case (3 names, 3 links, 1 requisition) lands in one group. **Built**: `src/scout/pipeline/dupes.py`, regrouped after every save; migration 0003 adds `v_duplicates` |
 | 1.8 | Ashby, Greenhouse, Lever enrichment | synthetic board fixtures; a failing board doesn't stop the sweep |
 | 1.9 | Trust scoring | the plan §6.2 red flags each have a test |
 | 1.10 | `scout sweep` CLI (`--dry-run` prints without writing) and a box setup section | a live run on the box loads the real postings; second run adds nothing new |
