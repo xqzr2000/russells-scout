@@ -337,6 +337,40 @@ The summary has four parts:
 | `structural` | The response wasn't what Scout expects: the API may have changed. |
 | `incomplete` (note) | Fewer postings than WorkBC reported (hit the page limit, or jobs closed mid-sweep). |
 
+## 14. Save sweeps to the database (Phase 1, box)
+
+After pulling and rebuilding (see **Updating**, which also runs `db migrate`):
+
+```bash
+cd /srv/scout/code
+docker compose --profile scout run --rm scout sweep
+```
+
+Same search and summary as the dry run, then a "saved to the database" section. The first
+time, every posting is new. Run it again and nothing should change: `new 0, changed 0`,
+everything "seen again", `not seen this time: 0`.
+
+How closing jobs are handled: a posting is counted as "missed" only after a sweep in which
+every term succeeded. After 3 misses in a row it becomes `removed`; it is never deleted, and
+it comes back as `reappeared` if WorkBC lists it again. `--term` runs and failed sweeps never
+count anything as missed.
+
+Look at the data with the read-only role, inside the db container:
+
+```bash
+cd /srv/scout/code
+q() { docker compose --profile scout exec -T db psql -U scout_reader -d scout -c "$1"; }
+q "SELECT title, employer, city, workplace, jump_url FROM v_new_relevant_7d LIMIT 20"
+q "SELECT area, match_quality, count(*) FROM postings GROUP BY 1, 2 ORDER BY 1, 2"
+q "SELECT ats, count(*) FROM postings GROUP BY 1 ORDER BY 2 DESC"
+q "SELECT title, employer, city FROM v_review"
+q "SELECT * FROM v_source_health"
+q "SELECT id, started_at, ok, terms_ok, terms_failed FROM scout_runs ORDER BY id DESC LIMIT 5"
+```
+
+(Inside the container, local connections need no password. From Windows, use the SSH tunnel
+from step 12 and the `scout_reader` password.)
+
 ---
 
 ## Updating

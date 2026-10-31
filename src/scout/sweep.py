@@ -1,11 +1,14 @@
 """`scout sweep`: run the WorkBC search for every configured term.
 
-Today only `--dry-run` exists: it fetches, classifies every posting (area, workplace,
-title match, job-board system, employer) and prints a summary. Nothing is written to the
-database yet; saving comes with task 1.6.
+Fetches every term, classifies every posting (area, workplace, title match, job-board
+system, employer), prints a summary and saves the sweep to Postgres as scout_ingest
+(src/scout/store.py).
 
-  scout sweep --dry-run                       live search, raw responses saved
+  scout sweep                                 live search, saved to the database
+  scout sweep --dry-run                       live search, nothing written to the database
   scout sweep --dry-run --replay sweep-…Z     re-run the rules on a saved sweep, offline
+
+Raw responses are saved in both live modes.
 
 Raw responses go to $SCOUT_RAW_DIR/sweep-<time>/ when that variable is set (the scout
 container sets it to /data/workbc-raw, which is $SCOUT_RAW_DIR_HOST =
@@ -20,7 +23,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scout import config
+from scout import config, db, store
 from scout.pipeline.record import PostingRecord, build
 from scout.sources import workbc
 
@@ -63,7 +66,9 @@ def _counts(counter: Counter, n: int = 15) -> str:
     return ", ".join(f"{k} {v}" for k, v in counter.most_common(n)) or "-"
 
 
-def summarize(result: workbc.SweepResult, records: list[PostingRecord], out=print) -> None:
+def summarize(
+    result: workbc.SweepResult, records: list[PostingRecord], out=print, replayed: bool = False
+) -> None:
     out(f"{'term':26} {'outcome':10} {'count':>5} {'got':>5} {'pages':>5}  note")
     for t in result.terms:
         count = "-" if t.count is None else str(t.count)
@@ -114,9 +119,12 @@ def summarize(result: workbc.SweepResult, records: list[PostingRecord], out=prin
     out("  own career sites: " + _counts(custom, 12))
 
     seconds = result.finished_at - result.started_at
-    requests = sum(max(t.pages, 1) for t in result.terms)
+    pages = sum(max(t.pages, 1) for t in result.terms)
     out("")
-    out(f"about {requests} requests in {seconds:.0f} s")
+    if replayed:
+        out(f"{pages} saved pages read")
+    else:
+        out(f"about {pages} requests in {seconds:.0f} s")
     for w in result.warnings:
         out(f"warning: {w}")
     if result.raw_dir:
@@ -135,8 +143,8 @@ def run(
     sleep=time.sleep,
     replay: str | None = None,
 ) -> int:
-    if not dry_run:
-        out("Saving to the database comes with task 1.6. For now use: scout sweep --dry-run")
+    if replay and not dry_run:
+        out("ERROR: --replay only works with --dry-run (a replay must not change the database)")
         return 2
     try:
         cfg = config.load()
@@ -152,6 +160,14 @@ def run(
             return 1
         chosen = terms
 
+    conn = None
+    if not dry_run:
+        try:
+            conn = db.connect("ingest", autocommit=True)
+        except db.DbError as e:
+            out(f"ERROR: {e}")
+            return 1
+
     raw_dir = raw_dir_for_run() if save_raw else None
     delay = cfg.sweep.delay_seconds
     if replay:
@@ -164,7 +180,8 @@ def run(
         post, sleep, raw_dir, delay = replay_post(folder), (lambda s: None), None, 0.5
         out(f"WorkBC sweep (dry run, replaying {shown_path(folder)}): {len(chosen)} terms")
     else:
-        out(f"WorkBC sweep (dry run): {len(chosen)} terms, titles only, all of B.C.")
+        mode = "dry run" if dry_run else "saving to the database"
+        out(f"WorkBC sweep ({mode}): {len(chosen)} terms, titles only, all of B.C.")
 
     result = workbc.sweep(
         chosen,
@@ -179,5 +196,30 @@ def run(
     )
     records = [build(job, result.matched_terms[jid], cfg) for jid, job in result.jobs.items()]
     out("")
-    summarize(result, records, out)
+    summarize(result, records, out, replayed=bool(replay))
+
+    if conn is not None:
+        with conn:
+            stats = store.save_sweep(
+                conn, result, records, cfg, all_terms=list(chosen) == list(cfg.terms)
+            )
+        report_saved(stats, out)
     return 0 if result.complete else 1
+
+
+def report_saved(stats: store.SaveStats, out=print) -> None:
+    out("")
+    out(f"== saved to the database (run {stats.run_id})")
+    out(
+        f"  new {stats.new}, changed {stats.changed}, seen again {stats.seen_again},"
+        f" reappeared {stats.reappeared}; new employers {stats.employers_new}"
+    )
+    if stats.skipped_area:
+        out(f"  not saved because of the area settings: {stats.skipped_area}")
+    if stats.removal_checked:
+        out(
+            f"  not seen this time: {stats.marked_missed} (counted as missed);"
+            f" removed after {store.MISSES_BEFORE_REMOVED} misses: {stats.removed}"
+        )
+    for note in stats.notes:
+        out(f"  {note}")

@@ -89,9 +89,21 @@ def test_replay_of_missing_folder(monkeypatch, tmp_path):
     assert code == 1 and "no saved sweep at" in text
 
 
-def test_sweep_without_dry_run_is_not_ready_yet():
+def test_replay_cannot_write_to_the_database():
     lines: list[str] = []
-    assert sweep.run(False, out=lines.append) == 2
+    assert sweep.run(False, replay="sweep-x", out=lines.append) == 2
+    assert "--replay only works with --dry-run" in lines[0]
+
+
+def test_save_without_database_settings_fails_before_contacting_workbc(monkeypatch):
+    monkeypatch.delenv("SCOUT_INGEST_PASSWORD", raising=False)
+
+    def no_network(url, body):
+        raise AssertionError("must not contact WorkBC when the database is unreachable")
+
+    lines: list[str] = []
+    assert sweep.run(False, out=lines.append, post=no_network) == 1
+    assert "SCOUT_INGEST_PASSWORD is not set" in lines[0]
 
 
 def test_unknown_term_is_refused():

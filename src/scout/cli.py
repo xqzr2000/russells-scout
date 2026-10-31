@@ -5,10 +5,11 @@
   scout db migrate    Apply new migrations/ files to Postgres (as scout_migrate).
   scout db status     List applied and pending migrations.
   scout db check      Connect as each role and check what it can and can't do.
-  scout sweep --dry-run [--term T ...] [--no-save] [--replay SWEEP]
+  scout sweep [--dry-run] [--term T ...] [--no-save] [--replay SWEEP]
                       Search WorkBC for every term in config/search.json, classify the
-                      postings and print a summary; nothing is written to the database
-                      yet. --replay re-runs the rules on a saved sweep, offline.
+                      postings, print a summary and save them to the database.
+                      --dry-run writes nothing to the database; --replay (with
+                      --dry-run) re-runs the rules on a saved sweep, offline.
 
 Add --show-browser to either command to run Chromium with a visible window
 (only works where there's a display, i.e. not in Codespaces).
@@ -96,7 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     p_db.add_argument("action", choices=["migrate", "status", "check"])
 
     p_sweep = sub.add_parser("sweep", help="search WorkBC for every configured term")
-    p_sweep.add_argument("--dry-run", action="store_true", help="fetch and summarize only")
+    p_sweep.add_argument(
+        "--dry-run", action="store_true", help="fetch and summarize; don't write to the database"
+    )
     p_sweep.add_argument(
         "--term", action="append", dest="terms", help="only this term (repeatable)"
     )
