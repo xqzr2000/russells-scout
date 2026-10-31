@@ -82,6 +82,16 @@ def connect(role: str, **kwargs) -> psycopg.Connection:
         raise DbError(f"can't connect as scout_{role}: {first}") from e
 
 
+# One sweep or enrichment at a time, whether started by a timer or by hand. A
+# session-level advisory lock: released when the connection closes, even after a crash.
+RUN_LOCK_KEY = 5_0726_1031
+
+
+def try_run_lock(conn: psycopg.Connection) -> bool:
+    """Take the run lock on this connection; False if another run holds it."""
+    return bool(conn.execute("SELECT pg_try_advisory_lock(%s)", (RUN_LOCK_KEY,)).fetchone()[0])
+
+
 # --------------------------------------------------------------------------- migrations
 
 

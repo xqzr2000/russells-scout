@@ -1,6 +1,6 @@
 # Phase 2 plan: runs on its own, daily digest, backups, sync
 
-Status: **draft** (2026-10-31). One open question: which email account sends the digest (§5).
+Status: **in progress** (2026-10-31). 2.1 and 2.2 built. Email: a Gmail account (§5).
 Architecture plan: [architecture-plan.md](architecture-plan.md) §7, §10, §11, §13.
 Still zero LLM tokens: nothing in Phase 2 involves the agent.
 
@@ -16,7 +16,7 @@ those backups. **Exit:** one week unattended, with a digest every day.
 | Digest email | 07:10 (after the morning sweep) | `scout digest` in a separate `digest` container |
 | Database backup | 03:30 | `ops/backup.sh` on the host: `pg_dump` from the `db` container |
 | Health check | every hour at :15 | `scout health`; emails only when something is broken |
-| Old raw files pruned | with the backup | raw WorkBC pages older than 30 days |
+| Old raw files pruned | after each sweep | raw WorkBC pages older than 30 days |
 | Backup pull to WSL2 | every 6 hours and at Windows login | Windows Task Scheduler runs a WSL2 script |
 
 The minutes are spread out so jobs don't overlap, and none land at :00. Twice a day is about 24
@@ -34,8 +34,9 @@ WorkBC requests and 50 job-board requests a day.
 
    The unit files live in the repo (`ops/systemd/`); one install script copies them into
    `/etc/systemd/system` and runs them as `shaw2012`.
-2. **No overlapping runs.** Each job takes a lock file; if the previous run is still going, the
-   new one is skipped and logged.
+2. **No overlapping runs.** A sweep or enrichment takes a database lock (a Postgres advisory
+   lock, released automatically if the run crashes). A second one, from a timer or by hand,
+   prints that it was skipped and exits. systemd never starts a timer's job twice at once.
 3. **Email credentials only in the digest container.** A new `digest` service uses the same image
    but:
    - logs in to the database as `scout_reader`;
@@ -108,31 +109,35 @@ HEALTH
 
 | Task | What | Done when |
 |---|---|---|
-| 2.1 | **Timers:** `ops/systemd/` units for sweep, digest, backup and health; `ops/systemd/install.sh`; lock files | `systemctl list-timers 'scout-*'` shows the next runs; a sweep runs by timer and shows in `scout status` |
-| 2.2 | **Backups:** `ops/backup.sh` (dump, restore check, keep 14 daily + 8 weekly, prune raw files over 30 days) | a dump in `/srv/scout/backups`; the restore check passes; a broken dump is reported as failed |
+| 2.1 | **Timers:** `ops/systemd/` units for sweep and backup (digest and health join in 2.3 and 2.5); `ops/systemd/install.sh`; the run lock; raw-file pruning | `systemctl list-timers 'scout-*'` shows the next runs; a sweep runs by timer and shows in `scout status`. **Built** |
+| 2.2 | **Backups:** `ops/backup.sh` (dump, restore check, keep 14 daily + 8 weekly) | a dump in `/srv/scout/backups`; the restore check passes; a broken dump is reported as failed. **Built** |
 | 2.3 | **Digest:** migration 0005 (`digests`); `scout digest [--dry-run]`; `digest` service in compose | `--dry-run` on the box shows the real jobs; tests cover "since last digest", empty days and a failed send |
 | 2.4 | **Email:** `mail.env`, `smtplib` sender, `scout digest --test-email` | a test email arrives in your inbox |
 | 2.5 | **Health alerts:** `scout health` (last good sweep, DB reachable), at most every 12 hours | stopping the db container produces one alert email, and no second one within 12 hours |
 | 2.6 | **WSL2 sync:** the restricted key on the box (`ops/sync/`), the pull script for WSL2, Task Scheduler steps | backups appear in WSL2; the key can't open a shell; the digest shows the sync time |
 | 2.7 | **A week unattended** and `docs/phase2-results.md` | 7 digests in a row; no missed sweeps; backups and sync current |
 
-Each task is one PR, as in Phase 1. 2.1–2.3 don't need the email answer; 2.4 does.
+Each task is one PR, as in Phase 1 (2.1 and 2.2 share one).
 
-## 5. Open question: which email account sends the digest
+## 5. Email account: Gmail (decided 2026-10-31)
 
-The box logs in to an email account to send the digest to you. The account's normal password
-is never used: you create an **app-specific password** that can only send and read mail, and
-you can revoke it any time without changing your real password. It goes in
-`/srv/scout/secrets/mail.env` (mode 600, never in git).
+The digest is sent through a Gmail account (`smtp.gmail.com`, port 587, STARTTLS) with an
+**app password**: a separate 16-character password made for Scout, which you can revoke at any
+time without changing the account's real password. Gmail requires 2-Step Verification before it
+offers app passwords. The password goes in `/srv/scout/secrets/mail.env` (mode 600, never in
+git). Step-by-step instructions come with task 2.4.
 
-| Option | Server | What you need |
-|---|---|---|
-| **Your iCloud Mail** (sends from your address to your address) | `smtp.mail.me.com`, port 587 | two-factor authentication on your Apple Account (usually already on), then an app-specific password from account.apple.com → Sign-In and Security |
-| A Gmail account | `smtp.gmail.com`, port 587 | 2-Step Verification, then an app password at myaccount.google.com/apppasswords |
-| A spare account made just for Scout | either of the above | the same, on the new account; keeps Scout's password away from your main mailbox |
+An app password can read the mailbox as well as send. If the Gmail account also holds your
+everyday mail, a new Gmail account made just for Scout keeps that password away from it; either
+works. (The other option considered was your iCloud address.)
 
-Either way, the password can read your mailbox too, not just send. A spare account limits what
-that password can reach if the box were ever compromised; your own account is simpler.
+## 5a. Box facts (checked 2026-10-31)
+
+- Time zone `America/Vancouver`, clock synchronized by NTP.
+- Ubuntu server (no desktop), up for days at a time; nothing puts it to sleep.
+- Docker starts at boot; `rsync` and `rrsync` are installed; 83 GB free.
+- Inside the db container, local connections need no password, so `pg_dump` runs there as
+  `postgres`. The port published on the box (127.0.0.1:5432) still needs a password.
 
 ## 6. Exit criteria
 

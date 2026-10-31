@@ -114,3 +114,16 @@ def test_unknown_term_is_refused():
 def test_slug_matches_saved_file_names():
     assert workbc.slug("AI engineer") == "ai_engineer"
     assert workbc.slug("business data analyst") == "business_data_analyst"
+
+
+def test_prune_raw_deletes_only_old_sweep_folders(tmp_path):
+    from datetime import UTC, datetime
+
+    for name in ("sweep-20260901-064000Z", "sweep-20261020-064000Z", "sweep-garbled", "notes"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "sweep-20260801-064000Z").write_text("a file, not a folder")
+    now = datetime(2026, 10, 31, 12, tzinfo=UTC)
+    assert sweep.prune_raw(tmp_path, now=now) == 1
+    left = sorted(p.name for p in tmp_path.iterdir())
+    assert left == ["notes", "sweep-20260801-064000Z", "sweep-20261020-064000Z", "sweep-garbled"]
+    assert sweep.prune_raw(tmp_path, now=now) == 0

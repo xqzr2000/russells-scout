@@ -1,0 +1,13 @@
+# Installed by ops/systemd/install.sh.
+[Unit]
+Description=Scout: sweep twice a day
+
+[Timer]
+OnCalendar=*-*-* 06:40:00 America/Vancouver
+OnCalendar=*-*-* 16:40:00 America/Vancouver
+# A run missed while the box was off happens soon after it starts again.
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

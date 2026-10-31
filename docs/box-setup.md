@@ -420,6 +420,74 @@ answered without them. A board that fails is retried next time and marks nothing
 
 ---
 
+## 16. Running on its own: timers and backups (Phase 2, box)
+
+From here Scout sweeps twice a day and backs up its database every night without you.
+Timers on the box start each job; each one runs in a fresh container and exits, as when you run
+it by hand. Times (Vancouver): **sweep 06:40 and 16:40**, **backup 03:30**. A job missed while
+the box was off runs soon after it starts again.
+
+**Once:** the backup folder (yours; the containers can't write to it):
+
+```bash
+sudo install -d -o $(id -un) -g $(id -gn) -m 750 /srv/scout/backups
+```
+
+**A first backup by hand** (about 10 seconds):
+
+```bash
+cd /srv/scout/code
+ops/backup.sh
+cat /srv/scout/backups/status
+```
+
+Expect `backup: restore check ok: employers=95 … postings=181 …` and `result=ok`. Each backup
+is loaded into a scratch database (`scout_restore_check`) and its row counts compared with the
+live database; the scratch copy is then dropped. Kept: the newest 14 dumps and one from each of
+the last 8 Sundays.
+
+**Install the timers** (asks for your password; they run as you, not as root):
+
+```bash
+sudo ops/systemd/install.sh
+systemctl list-timers 'scout-*'
+```
+
+Expect two lines, `scout-sweep.timer` and `scout-backup.timer`, with their next run times.
+
+**Try one sweep through the timer's service** (about a minute; the command waits until it's
+done):
+
+```bash
+sudo systemctl start scout-sweep.service
+journalctl -u scout-sweep -n 30 --no-pager
+docker compose --profile scout run --rm scout status
+```
+
+The journal shows the same output as a sweep by hand; `status` lists it under recent runs.
+(If `journalctl` says you can't see the system's messages, put `sudo` in front.)
+
+Day to day:
+
+| To | Run |
+|---|---|
+| See when jobs run next, and last ran | `systemctl list-timers 'scout-*'` |
+| Read a sweep's or backup's output | `journalctl -u scout-sweep --since today` (or `-u scout-backup`) |
+| See whether the last run failed | `systemctl status scout-sweep.service scout-backup.service --no-pager` |
+| Pause the sweeps (stays paused across reboots) | `sudo systemctl disable --now scout-sweep.timer` |
+| Resume them | `sudo systemctl enable --now scout-sweep.timer` |
+| Remove all Scout timers | `sudo ops/systemd/install.sh --remove` |
+
+Only one sweep or enrichment runs at a time. If you start one by hand while a timer's sweep is
+running, yours prints "Another sweep or enrichment is running; this one is skipped." Raw WorkBC
+responses in `/srv/scout/logs/workbc` older than 30 days are deleted after each sweep.
+
+To restore a backup (not needed day to day; a full restore drill is a Phase 5 task):
+`docker compose --profile scout exec -T db pg_restore -U postgres -d scout --clean --if-exists < /srv/scout/backups/scout-<time>.dump`.
+It replaces what's in the database with the backup's contents.
+
+---
+
 ## Updating
 
 When `main` on GitHub has changed (you edit it through the web UI or from your own machine):
@@ -436,9 +504,12 @@ agent/phase0/smoke.sh --offline
 docker compose --profile scout build scout
 docker compose --profile scout run --rm scout db migrate
 docker compose --profile scout run --rm scout db check
+# Phase 2 on: only when the pull changed ops/systemd/ (git pull lists the changed files).
+sudo ops/systemd/install.sh
 ```
 
-Your key, workspace and logs in `/srv/scout` are not touched. To go back if something breaks:
+The timers use the new code from their next run; `ops/backup.sh` runs straight from
+`/srv/scout/code`. Your key, workspace and logs in `/srv/scout` are not touched. To go back if something breaks:
 `git log --oneline` then `git checkout <commit>` (and `git checkout main` to return).
 
 Results you want on GitHub (for example the numbers for `phase0-results.md`) go there by hand
@@ -485,6 +556,10 @@ Revoke the DeepSeek key on the console if you're not reusing it.
 | `password authentication failed for user "scout_…"` | `db-roles.env` changed after the database was first created. Passwords are set only on first start: reset the database (Starting over). |
 | `db check` fails with "migrations not applied" | `docker compose --profile scout run --rm scout db migrate` |
 | `… was edited after it was applied` | A migration file changed on GitHub. Applied migrations are never edited; put the change in a new numbered file. |
+| `systemctl list-timers` shows no `scout-` timers | `sudo ops/systemd/install.sh` (step 16), from `/srv/scout/code`. |
+| A timer's run failed | `journalctl -u scout-sweep -n 50 --no-pager` (or `scout-backup`). `docker: permission denied … docker.sock`: your account isn't in the `docker` group (`groups`); the timers run as you. |
+| `backup: FAILED: … doesn't exist` | Create the folder: the `install -d` line in step 16. |
+| `backup: FAILED: the dump doesn't restore` | The dump is kept in `/srv/scout/backups` for a look; earlier dumps are untouched. Paste `journalctl -u scout-backup -n 50`. |
 | `Permission denied` in `/workspace` | `sudo chown 10001 /srv/scout/workspace` |
 | Can't read agent files on the host | They're owned by uid 10001; your group can read them if step 2 was followed. Otherwise `sudo ls /srv/scout/workspace`. |
 
@@ -492,5 +567,7 @@ Revoke the DeepSeek key on the console if you're not reusing it.
 
 - A firewall rule so the agent container can't reach your home LAN at the network level
   (today only the hook blocks LAN addresses by text). Acceptance test 10.
-- Host timer for scheduled sessions, `CLAUDE.md` for the agent, the agent's local git
-  repo and the WSL2 sync job (Phases 2–3).
+- The daily digest email, health alerts and the WSL2 sync job (rest of Phase 2,
+  [phase2-plan.md](phase2-plan.md)).
+- Host timer for agent sessions, `CLAUDE.md` for the agent and the agent's local git repo
+  (Phase 3).

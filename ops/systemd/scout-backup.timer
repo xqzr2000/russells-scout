@@ -1,0 +1,11 @@
+# Installed by ops/systemd/install.sh.
+[Unit]
+Description=Scout: database backup every night
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 America/Vancouver
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

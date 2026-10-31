@@ -302,3 +302,35 @@ def test_scout_sweep_saves_then_enriches(clean_db):
     assert "from boards: new 3" in text
     with db.connect("reader") as c:
         assert c.execute("SELECT count(*) FROM v_new_relevant_7d").fetchone()[0] == 7
+
+
+@needs_db
+def test_second_sweep_is_skipped_while_one_runs(clean_db):
+    """A timer sweep and a hand-run sweep must never write at the same time."""
+    from scout import sweep
+
+    def post(url, body):
+        raise AssertionError("a skipped sweep must not contact WorkBC")
+
+    with db.connect("ingest", autocommit=True) as holder:
+        assert db.try_run_lock(holder)
+        lines: list[str] = []
+        code = sweep.run(False, out=lines.append, post=post, sleep=lambda s: None, save_raw=False)
+        assert code == 0
+        assert "Another sweep or enrichment is running; this one is skipped." in lines
+    with db.connect("reader") as c:
+        assert c.execute("SELECT count(*) FROM scout_runs").fetchone()[0] == 0
+    with db.connect("ingest", autocommit=True) as again:  # released when the holder closed
+        assert db.try_run_lock(again)
+
+
+@needs_db
+def test_enrich_is_skipped_while_a_sweep_runs(clean_db, capsys):
+    from scout import cli
+
+    with db.connect("ingest", autocommit=True) as holder:
+        assert db.try_run_lock(holder)
+        assert cli.run_enrich(False, None) == 0
+    assert "this one is skipped" in capsys.readouterr().out
+    with db.connect("reader") as c:
+        assert c.execute("SELECT count(*) FROM scout_runs").fetchone()[0] == 0
