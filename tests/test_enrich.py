@@ -85,6 +85,17 @@ WORKBC = [
         ("Remote", "Remote", "US", "remote", "outside"),
         ("Seattle, WA", "Seattle", "United States", "onsite", "outside"),
         ("Toronto, Ontario, Canada", "Toronto", None, "unknown", "outside"),
+        ("Ontario", "Ontario", None, "remote", "remote"),
+        ("Remote - Anywhere", "Remote", None, "remote", "remote"),
+        # seen live 2026-10-31: remote abroad must not pass
+        (
+            "Pakistan - Remote; Remote - Islamabad; Remote - Lahore",
+            "Pakistan",
+            None,
+            "remote",
+            "outside",
+        ),
+        ("Remote - Sweden", "Remote", None, "remote", "outside"),
     ],
 )
 def test_ats_area(location, city, country, workplace, area):
@@ -95,7 +106,25 @@ def test_ats_area(location, city, country, workplace, area):
 def test_term_hits_like_workbc_search():
     assert classify.term_hits("Engineer, Data Platform", CFG.terms) == ("data engineer",)
     assert classify.term_hits("Office Manager", CFG.terms) == ()
-    assert "ML engineer" in classify.term_hits("Senior Machine Learning Engineer", CFG.terms)
+    assert classify.term_hits("Senior Machine Learning Engineer", CFG.terms) == (
+        "machine learning",
+    )
+    assert classify.term_hits("AI Engineer", CFG.terms) == ("AI engineer",)
+    assert classify.term_hits("Data Scientists", CFG.terms) == ("data scientist",)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [  # seen live 2026-10-31: "AI" alone is not "artificial intelligence" when finding jobs
+        "Senior Product Manager, AI Operations",
+        "AI Automation Co-op (Spring 2027)",
+        "Senior Pre-Sales Solutions Architect – AI Agent & Workload Security",
+        "Manager, Engineering - AI/BI",
+        "Continuous Improvement & AI Intelligence Automation Lead",
+    ],
+)
+def test_term_hits_ai_alone_finds_nothing(title):
+    assert classify.term_hits(title, CFG.terms) == ()
 
 
 # --------------------------------------------------------------------------- database

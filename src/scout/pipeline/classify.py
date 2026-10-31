@@ -154,12 +154,15 @@ def title_match(title: str, terms: Iterable[str]) -> TitleMatch:
 
 
 def term_hits(title: str, terms: Iterable[str]) -> tuple[str, ...]:
-    """Terms whose words all appear in the title, in any order: what WorkBC's title search
-    returns. Used to filter postings found directly on job boards the same way."""
-    words = set(_words(title))
+    """Terms whose words all appear in the title, in any order (a plural "s" allowed): the same
+    test as WorkBC's title search, so postings found directly on job boards are filtered as
+    strictly as WorkBC's. Literal words only: "AI" does not stand in for "artificial
+    intelligence" here (that equivalence applies to exact/loose quality, not to finding jobs).
+    """
+    words = set(re.findall(r"[a-z0-9]+", title.casefold()))
     hits = []
     for term in terms:
-        tw = _words(term)
+        tw = re.findall(r"[a-z0-9]+", term.casefold())
         if tw and all(w in words or f"{w}s" in words for w in tw):
             hits.append(term)
     return tuple(hits)
