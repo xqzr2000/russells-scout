@@ -1,0 +1,35 @@
+{
+  "jobs": [
+    {
+      "id": 8525610002,
+      "internal_job_id": 4400001002,
+      "title": "Sr. Data Scientist, Pricing",
+      "absolute_url": "https://job-boards.greenhouse.io/contoso/jobs/8525610002",
+      "location": {"name": "Vancouver, British Columbia, Canada"},
+      "updated_at": "2026-10-28T10:00:00-07:00",
+      "first_published": "2026-10-13T09:00:00-07:00",
+      "requisition_id": "REQ-1001",
+      "metadata": null,
+      "departments": [{"id": 1, "name": "Data"}],
+      "offices": [{"id": 2, "name": "Vancouver"}],
+      "content": "&lt;p&gt;Price things with &lt;strong&gt;statistics&lt;/strong&gt;.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Python&lt;/li&gt;&lt;li&gt;SQL&lt;/li&gt;&lt;/ul&gt;"
+    },
+    {
+      "id": 8525610003,
+      "title": "Data Analyst",
+      "absolute_url": "https://job-boards.greenhouse.io/contoso/jobs/8525610003",
+      "location": {"name": "Remote - Canada"},
+      "updated_at": "2026-10-29T10:00:00-07:00",
+      "content": "&lt;p&gt;Dashboards.&lt;/p&gt;"
+    },
+    {
+      "id": 8525610004,
+      "title": "Account Executive",
+      "absolute_url": "https://job-boards.greenhouse.io/contoso/jobs/8525610004",
+      "location": {"name": "Toronto, Ontario, Canada"},
+      "updated_at": "2026-10-29T10:00:00-07:00",
+      "content": "&lt;p&gt;Sell.&lt;/p&gt;"
+    }
+  ],
+  "meta": {"total": 3}
+}

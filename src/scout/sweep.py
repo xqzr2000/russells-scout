@@ -2,7 +2,8 @@
 
 Fetches every term, classifies every posting (area, workplace, title match, job-board
 system, employer), prints a summary and saves the sweep to Postgres as scout_ingest
-(src/scout/store.py).
+(src/scout/store.py), then reads the Ashby, Greenhouse and Lever boards
+(src/scout/enrich.py) unless --no-enrich.
 
   scout sweep                                 live search, saved to the database
   scout sweep --dry-run                       live search, nothing written to the database
@@ -23,7 +24,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scout import config, db, store
+from scout import config, db, enrich, store
 from scout.pipeline import dupes
 from scout.pipeline.record import PostingRecord, build
 from scout.sources import workbc
@@ -158,6 +159,8 @@ def run(
     post: workbc.Post = workbc.http_post,
     sleep=time.sleep,
     replay: str | None = None,
+    enrich_after: bool = True,
+    ats_get=None,
 ) -> int:
     if replay and not dry_run:
         out("ERROR: --replay only works with --dry-run (a replay must not change the database)")
@@ -219,7 +222,11 @@ def run(
             stats = store.save_sweep(
                 conn, result, records, cfg, all_terms=list(chosen) == list(cfg.terms)
             )
-        report_saved(stats, out)
+            report_saved(stats, out)
+            if enrich_after:
+                kwargs = {"get": ats_get} if ats_get else {}
+                estats = enrich.enrich(conn, cfg, sleep=sleep, **kwargs)
+                enrich.report(estats, out)
     return 0 if result.complete else 1
 
 

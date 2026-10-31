@@ -1,0 +1,69 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    {
+      "id": "11111111-2222-3333-4444-555555555555",
+      "title": "Senior Data Scientist",
+      "department": "Data",
+      "team": "Risk",
+      "employmentType": "FullTime",
+      "location": "Vancouver, BC",
+      "secondaryLocations": [],
+      "address": {"postalAddress": {"addressLocality": "Vancouver", "addressRegion": "British Columbia", "addressCountry": "Canada"}},
+      "isRemote": true,
+      "workplaceType": "Hybrid",
+      "isListed": true,
+      "publishedAt": "2026-10-20T17:00:00.000+00:00",
+      "jobUrl": "https://jobs.ashbyhq.com/northwind/11111111-2222-3333-4444-555555555555",
+      "applyUrl": "https://jobs.ashbyhq.com/northwind/11111111-2222-3333-4444-555555555555/application",
+      "descriptionPlain": "Build risk models. Python and SQL.",
+      "descriptionHtml": "<p>Build risk models. Python and SQL.</p>",
+      "compensation": {
+        "compensationTierSummary": "CA$140K – CA$170K",
+        "summaryComponents": [
+          {"compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "CAD", "minValue": 140000, "maxValue": 170000},
+          {"compensationType": "EquityPercentage", "interval": "NONE", "currencyCode": null, "minValue": 0.01, "maxValue": 0.05}
+        ]
+      }
+    },
+    {
+      "id": "22222222-3333-4444-5555-666666666666",
+      "title": "Machine Learning Engineer",
+      "location": "Remote (Canada)",
+      "address": {"postalAddress": {"addressLocality": null, "addressRegion": null, "addressCountry": "Canada"}},
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "isListed": true,
+      "publishedAt": "2026-10-25T17:00:00.000+00:00",
+      "jobUrl": "https://jobs.ashbyhq.com/northwind/22222222-3333-4444-5555-666666666666",
+      "descriptionPlain": "Ship models to production.",
+      "compensation": {"summaryComponents": [{"compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "CAD", "minValue": 150000, "maxValue": 185000}]}
+    },
+    {
+      "id": "33333333-4444-5555-6666-777777777777",
+      "title": "Data Engineer",
+      "location": "Seattle, WA",
+      "address": {"postalAddress": {"addressLocality": "Seattle", "addressRegion": "Washington", "addressCountry": "United States"}},
+      "isRemote": false,
+      "workplaceType": "OnSite",
+      "isListed": true,
+      "jobUrl": "https://jobs.ashbyhq.com/northwind/33333333-4444-5555-6666-777777777777",
+      "descriptionPlain": "Pipelines."
+    },
+    {
+      "id": "44444444-5555-6666-7777-888888888888",
+      "title": "Office Manager",
+      "location": "Vancouver, BC",
+      "workplaceType": "OnSite",
+      "isListed": true,
+      "jobUrl": "https://jobs.ashbyhq.com/northwind/44444444-5555-6666-7777-888888888888"
+    },
+    {
+      "id": "55555555-6666-7777-8888-999999999999",
+      "title": "Data Analyst (internal)",
+      "location": "Vancouver, BC",
+      "isListed": false,
+      "jobUrl": "https://jobs.ashbyhq.com/northwind/55555555-6666-7777-8888-999999999999"
+    }
+  ]
+}

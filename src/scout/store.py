@@ -167,7 +167,11 @@ def _save_posting(
     posting_id, status, old_hash, old_terms = old[0], old[1], old[2], old[3] or []
     if not all_terms:  # a --term run only saw some terms: add to the list, don't replace it
         values["matched_terms"] = old_terms + [t for t in rec.matched_terms if t not in old_terms]
-    sets = ", ".join(f"{c} = %s" for c in values)
+    # A board found later by enrichment (e.g. for ?gh_jid= links) is kept when the WorkBC
+    # link alone doesn't name one.
+    sets = ", ".join(
+        f"{c} = COALESCE(%s, {c})" if c == "ats_board" else f"{c} = %s" for c in values
+    )
     conn.execute(
         f"UPDATE postings SET {sets}, employer_id = %s, content_hash = %s, status = 'active',"
         " last_seen_at = now(), missed_runs = 0 WHERE id = %s",

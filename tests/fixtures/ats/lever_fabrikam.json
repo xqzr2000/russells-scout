@@ -1,0 +1,27 @@
+[
+  {
+    "id": "abcdef12-3456-7890-abcd-ef1234567890",
+    "text": "Data Engineer",
+    "hostedUrl": "https://jobs.lever.co/fabrikam/abcdef12-3456-7890-abcd-ef1234567890",
+    "applyUrl": "https://jobs.lever.co/fabrikam/abcdef12-3456-7890-abcd-ef1234567890/apply",
+    "createdAt": 1761600000000,
+    "categories": {"commitment": "Full-time", "department": "Engineering", "location": "Vancouver, BC", "team": "Data Platform", "allLocations": ["Vancouver, BC"]},
+    "country": "CA",
+    "workplaceType": "hybrid",
+    "descriptionPlain": "Own our pipelines.",
+    "lists": [{"text": "What you'll do", "content": "<li>Build Spark jobs</li><li>Own dbt models</li>"}],
+    "additionalPlain": "The base range for this role in Canada is $110,000 - $135,000 CAD.",
+    "salaryRange": {"min": 110000, "max": 135000, "currency": "CAD", "interval": "per-year-salary"},
+    "salaryDescription": null
+  },
+  {
+    "id": "bcdef123-4567-890a-bcde-f12345678901",
+    "text": "Quantitative Analyst",
+    "hostedUrl": "https://jobs.lever.co/fabrikam/bcdef123-4567-890a-bcde-f12345678901",
+    "createdAt": 1761700000000,
+    "categories": {"commitment": "Full-time", "location": "Burnaby, BC"},
+    "country": "CA",
+    "workplaceType": "onsite",
+    "descriptionPlain": "Models for trading."
+  }
+]
