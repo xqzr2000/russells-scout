@@ -11,6 +11,7 @@
 #   ${SCOUT_HOME}/policy/                live locked settings + hook (root-owned)
 #   ${SCOUT_HOME}/workspace/             the agent's only writable folder
 #   ${SCOUT_HOME}/pgdata/                Postgres data (only the db container sees it)
+#   ${SCOUT_HOME}/logs/workbc/           raw WorkBC responses from sweeps (scout writes, uid 10002)
 #   ${SCOUT_HOME}/secrets/db-admin.env   Postgres superuser password (db only)
 #   ${SCOUT_HOME}/secrets/db-roles.env   passwords for the four scout_* roles
 #                                        (made by ops/db/make-secrets.sh)
@@ -143,6 +144,10 @@ services:
         required: true
     environment:
       SCOUT_DB_HOST: db
+      SCOUT_RAW_DIR: /data/workbc-raw
+    volumes:
+      # The only host folder it can write: raw sweep responses, for debugging.
+      - ${SCOUT_HOME:-/srv/scout}/logs/workbc:/data/workbc-raw
     networks: [data]
     depends_on:
       db:

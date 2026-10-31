@@ -256,7 +256,9 @@ ops/db/make-secrets.sh
 ls -l /srv/scout/secrets
 ```
 
-Start the database. The first start creates the `scout` database and the four roles (about 10–20 s):
+Start the database. The first start creates the `scout` database and the four roles (about 10–20 s).
+If Postgres was ever installed on Ubuntu itself (`apt install postgresql`), it holds port 5432 and
+the container can't start: see Troubleshooting.
 
 ```bash
 docker compose --profile scout up -d db
@@ -284,6 +286,37 @@ The agent container is on a different Docker network and can't reach the databas
 To look at the data from Windows later: `ssh -L 5432:localhost:5432 scoutbox` in WSL2, then
 connect DBeaver or pgAdmin to `localhost:5432`, database `scout`, user `scout_reader`, with the
 password from `/srv/scout/secrets/db-roles.env`.
+
+## 13. First WorkBC sweep, dry run (Phase 1, box)
+
+Searches WorkBC for every term in [`config/search.json`](../config/search.json) and prints a
+summary. Nothing is written to the database yet (that comes with task 1.6). Raw responses
+are saved to `/srv/scout/logs/workbc/sweep-<time>/` for debugging.
+
+Once, create that folder for the scout container (uid 10002), readable by you:
+
+```bash
+sudo install -d -o 10002 -g $(id -gn) -m 2775 /srv/scout/logs/workbc
+```
+
+Then, after pulling and rebuilding (see **Updating**):
+
+```bash
+cd /srv/scout/code
+docker compose --profile scout run --rm scout sweep --dry-run
+```
+
+About a dozen requests, one a second. The last line should say `complete sweep: yes`.
+For one term only: `… sweep --dry-run --term "data scientist"`. To change the terms,
+edit `config/search.json` on GitHub, pull, and rebuild the scout image.
+
+| Outcome | Meaning |
+|---|---|
+| `ok` / `empty` | Fine. `empty` means WorkBC has no postings for that term today. |
+| `transient` | Timeouts or server errors, still failing after 2 retries. Try again later. |
+| `restricted` | WorkBC refused us (401/403). Stop and check before trying again. |
+| `structural` | The response wasn't what Scout expects: the API may have changed. |
+| `incomplete` (note) | Fewer postings than WorkBC reported (hit the page limit, or jobs closed mid-sweep). |
 
 ---
 
@@ -346,6 +379,8 @@ Revoke the DeepSeek key on the console if you're not reusing it.
 | A session never returns, even after the timeout | Something is reading the terminal. `run-session.sh` feeds sessions `</dev/null`; do the same if you run `docker compose run … claude -p` by hand under `timeout`. |
 | `[claude-code:unrecognized_model] deepseek-flash` on stderr | Harmless: Claude Code doesn't know DeepSeek's model names. |
 | "Managed settings document could not be parsed" | `/srv/scout/policy/managed-settings.json` isn't valid JSON; re-install from the repo (step 5). |
+| `failed to bind host port 127.0.0.1:5432 … address already in use` | Another Postgres is running on the box, usually one installed with apt. Check with `sudo ss -ltnp 'sport = :5432'`. If it's unused (`sudo -u postgres psql -l` shows only postgres/template0/template1): `sudo systemctl disable --now postgresql postgresql@18-main` (use your version number), then `docker compose --profile scout up -d db` again. |
+| `warning: not saving raw responses: can't …` | `/srv/scout/logs/workbc` is missing or not writable by uid 10002: run the `install -d` line in step 13. |
 | `db` never becomes healthy | `docker compose --profile scout logs db`. "Permission denied" on the data folder: re-run the `chown 999:999` line in step 12. |
 | `password authentication failed for user "scout_…"` | `db-roles.env` changed after the database was first created. Passwords are set only on first start: reset the database (Starting over). |
 | `db check` fails with "migrations not applied" | `docker compose --profile scout run --rm scout db migrate` |
