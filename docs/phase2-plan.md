@@ -1,6 +1,6 @@
 # Phase 2 plan: runs on its own, daily digest, backups, sync
 
-Status: **in progress** (2026-10-31). 2.1 and 2.2 done on the box; 2.3 built. No email: the
+Status: **in progress** (2026-10-31). 2.1–2.3 running on the box; 2.6 built. No email: the
 digest is a file on the box that you read yourself (§5).
 Architecture plan: [architecture-plan.md](architecture-plan.md) §7, §10, §11, §13.
 Still zero LLM tokens: nothing in Phase 2 involves the agent.
@@ -50,7 +50,10 @@ WorkBC requests and 50 job-board requests a day.
    - Each backup is checked by restoring it into a scratch database and comparing row counts;
      the scratch database is then dropped. A dump that doesn't restore counts as a failed backup.
 5. **WSL2 sync key:** a separate SSH key, allowed only to read: the backups and the digests. It
-   can't open a shell or write files. Each use leaves a timestamp in
+   can't open a shell or write files. In `~/.ssh/authorized_keys` it's locked to
+   `ops/sync/sync-gate.sh` with `restrict` (no terminal, no forwarding); the gate accepts only an
+   rsync download of `backups/` or `digests/` and hands it to `rrsync -ro`. The WSL2 copy never
+   deletes, so a wiped box can't wipe it. Each use leaves a timestamp in
    `/srv/scout/logs/sync/last-sync`, so the digest can say "sync to WSL2: N hours ago". The
    architecture plan also syncs the agent's repo; that repo arrives in Phase 3 and will be added
    to the same key then.
@@ -59,7 +62,7 @@ WorkBC requests and 50 job-board requests a day.
    itself the sign something is wrong: check the date on its first line. A phone notification
    (for example ntfy, counts only, no job details) can be added later if you want one.
 7. **"New" in the digest means new since the last digest written**, not "last 7 days". The
-   `digests` table records each one (migration 0005). If a digest fails, the next one still
+   `digests` table records each one (migrations 0005 and 0006). If a digest fails, the next one still
    covers everything since the last successful one.
 
 ## 3. The digest
@@ -112,10 +115,10 @@ HEALTH
 |---|---|---|
 | 2.1 | **Timers:** `ops/systemd/` units for sweep and backup; `ops/systemd/install.sh`; the run lock; raw-file pruning | `systemctl list-timers 'scout-*'` shows the next runs; a sweep runs by timer and shows in `scout status`. **Done** (2026-10-31) |
 | 2.2 | **Backups:** `ops/backup.sh` (dump, restore check, keep 14 daily + 8 weekly) | a dump in `/srv/scout/backups`; the restore check passes; a broken dump is reported as failed. **Done** (2026-10-31: 181 postings restored) |
-| 2.3 | **Digest:** migration 0005 (`digests`); `scout digest [--dry-run]`; `digest` service; `scout-digest.timer` | a digest file on the box with the real jobs; tests cover "since last digest", empty days and a failed write. **Built** |
+| 2.3 | **Digest:** migrations 0005–0006 (`digests`); `scout digest [--dry-run]`; `digest` service; `scout-digest.timer` | a digest file on the box with the real jobs; tests cover "since last digest", empty days and a failed write. **Done** (2026-10-31: first digest written) |
 | 2.4 | ~~Email~~ | **Dropped** (2026-10-31): Gmail app passwords aren't available for your account; you read the digest yourself |
 | 2.5 | ~~Health alerts~~ | **Dropped** with email: problems go at the top of the digest instead |
-| 2.6 | **WSL2 sync:** the restricted read-only key on the box (`ops/sync/`), the pull script for WSL2 (backups and digests), Task Scheduler steps | backups and digests appear in WSL2; the key can't open a shell; the digest shows the sync time |
+| 2.6 | **WSL2 sync:** the restricted read-only key on the box (`ops/sync/`), the pull script for WSL2 (backups and digests), Task Scheduler steps | backups and digests appear in WSL2; the key can't open a shell; the digest shows the sync time. **Built**: `ops/sync/` (gate with `rrsync -ro`, key installer, pull script), box setup §18 |
 | 2.7 | **A week unattended** and `docs/phase2-results.md` | 7 digests in a row; no missed sweeps; backups and sync current |
 
 Each task is one PR, as in Phase 1 (2.1 and 2.2 shared one).
