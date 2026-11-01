@@ -1,26 +1,20 @@
-"""`scout digest`: the daily email (Phase 2, tasks 2.3–2.4).
+"""`scout digest`: the daily digest, saved as files on the box (Phase 2, task 2.3).
 
-  scout digest                 build the digest, send it, record it in `digests`
-  scout digest --dry-run       print it; send nothing, record nothing
-  scout digest --test-email    send a short test email (checks mail.env; no database)
+  scout digest              build the digest, write it to files, record it in `digests`
+  scout digest --dry-run    print it; write nothing, record nothing
 
-The digest covers everything since the last digest that was sent (the first one: the last
-24 hours): new relevant jobs, new possible matches, jobs that closed, suspicious postings,
-and a health section (sweeps, sources, backup, sync to WSL2, disk). Problems are listed at
-the top and counted in the subject.
+The digest covers everything since the last digest written (the first one: the last 24
+hours): new relevant jobs, new possible matches, jobs that closed, suspicious postings, and
+a health section (sweeps, sources, backup, sync to WSL2, disk). Problems are listed at the
+top and counted in the title line.
 
-Reads the database as scout_reader; records the sent digest as scout_ingest. Email settings
-come only from the environment (the digest service's mail.env), never from config or the
-database, so the recipient can't be changed from inside Scout:
+Files, in $SCOUT_DIGESTS_DIR (default /data/digests; /srv/scout/logs/digests on the box):
+  <YYYY-MM-DD-HHMM>.txt and .html   one pair per digest, Vancouver time
+  latest.txt, latest.html           copies of the newest pair
+Pairs older than KEEP_DAYS are deleted. Nothing leaves the box: there is no email.
 
-  SCOUT_SMTP_USER       the Gmail address that sends (required)
-  SCOUT_SMTP_PASSWORD   its app password (required; spaces are ignored)
-  SCOUT_MAIL_TO         who gets the digest (required)
-  SCOUT_MAIL_FROM       default: SCOUT_SMTP_USER
-  SCOUT_SMTP_HOST       default: smtp.gmail.com
-  SCOUT_SMTP_PORT       default: 587 (STARTTLS); 465 means TLS from the start
-
-Box files it reads (mounted read-only under $SCOUT_LOGS_DIR, default /data/logs):
+Reads the database as scout_reader; records the digest as scout_ingest. Box files it reads
+(mounted read-only under $SCOUT_LOGS_DIR, default /data/logs):
   backup-status   written by ops/backup.sh
   sync/last-sync  written each time WSL2 pulls the backups (task 2.6)
 """
@@ -29,13 +23,10 @@ from __future__ import annotations
 
 import html
 import os
+import re
 import shutil
-import smtplib
-import ssl
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from email.message import EmailMessage
-from email.utils import formatdate, make_msgid
 from pathlib import Path
 
 from scout import db
@@ -48,7 +39,8 @@ NO_SWEEP_HOURS = 24
 BACKUP_MAX_HOURS = 36
 SYNC_MAX_HOURS = 48
 DISK_MIN_GB = 5.0
-SETUP_HINT = "create /srv/scout/secrets/mail.env with ops/mail/make-mail-env.sh (box-setup §17)"
+KEEP_DAYS = 90
+STAMP_RE = r"^\d{4}-\d{2}-\d{2}-\d{4}$"
 
 
 class DigestError(Exception):
@@ -88,6 +80,7 @@ class Digest:
     covers_from: datetime
     covers_to: datetime
     day: str  # e.g. "Sun Nov 1", in Vancouver time
+    stamp: str  # e.g. "2026-11-01-0710": the file name
     since: str  # e.g. "Sat Oct 31 07:10"
     first: bool
     relevant_open: int
@@ -99,7 +92,7 @@ class Digest:
         return next((s.total for s in self.sections if s.title == title), 0)
 
     @property
-    def subject(self) -> str:
+    def title(self) -> str:
         new, sus = self.count(NEW), self.count(SUSPICIOUS)
         jobs = "no new jobs" if new == 0 else f"{new} new job{'s' if new != 1 else ''}"
         parts = [jobs, f"{sus} suspicious"]
@@ -108,7 +101,7 @@ class Digest:
         return f"Scout: {', '.join(parts)} ({self.day})"
 
     def text(self) -> str:
-        lines: list[str] = []
+        lines: list[str] = [self.title, ""]
         since = "the last 24 hours (first digest)" if self.first else f"since {self.since}"
         lines.append(f"Scout digest for {self.day}: {since}.")
         lines.append(f"Relevant jobs open right now: {self.relevant_open}.")
@@ -126,7 +119,7 @@ class Digest:
             if s.total > len(s.jobs):
                 lines.append(f"  … and {s.total - len(s.jobs)} more (`scout status`)")
         lines += ["", "HEALTH"] + [f"  {h}" for h in self.health]
-        lines += ["", "Sent automatically by Scout, from the box."]
+        lines += ["", f"Written by Scout on the box ({self.stamp})."]
         return "\n".join(lines) + "\n"
 
     def html(self) -> str:
@@ -134,9 +127,11 @@ class Digest:
         since = "the last 24 hours (first digest)" if self.first else f"since {e(self.since)}"
         out = [
             (
-                '<!DOCTYPE html><html><body style="font-family:-apple-system,Segoe UI,Arial,'
+                f'<!DOCTYPE html><html><head><meta charset="utf-8"><title>{e(self.title)}</title>'
+                '</head><body style="font-family:-apple-system,Segoe UI,Arial,'
                 'sans-serif;font-size:14px;line-height:1.45;color:#222;max-width:720px">'
             ),
+            f"<h2>{e(self.title)}</h2>",
             (
                 f"<p>Scout digest for <b>{e(self.day)}</b>: {since}.<br>"
                 f"Relevant jobs open right now: <b>{self.relevant_open}</b>.</p>"
@@ -286,10 +281,11 @@ def gather(conn, logs_dir: Path | None = None, limit: int = LIST_LIMIT) -> Diges
     to, last = one("SELECT now(), (SELECT max(covers_to) FROM digests)")
     first = last is None
     frm = one(f"SELECT now() - interval '{FIRST_WINDOW}'")[0] if first else last
-    day, since = one(
+    day, since, stamp = one(
         "SELECT to_char(%s::timestamptz AT TIME ZONE %s, 'Dy Mon FMDD'),"
-        " to_char(%s::timestamptz AT TIME ZONE %s, 'Dy Mon FMDD HH24:MI')",
-        to, tz, frm, tz,
+        " to_char(%s::timestamptz AT TIME ZONE %s, 'Dy Mon FMDD HH24:MI'),"
+        " to_char(%s::timestamptz AT TIME ZONE %s, 'YYYY-MM-DD-HH24MI')",
+        to, tz, frm, tz, to, tz,
     )  # fmt: skip
     window = " AND p.first_seen_at > %s AND p.first_seen_at <= %s"
 
@@ -378,84 +374,62 @@ def gather(conn, logs_dir: Path | None = None, limit: int = LIST_LIMIT) -> Diges
     _disk_health(logs, health, problems)
 
     return Digest(
-        covers_from=frm, covers_to=to, day=day, since=since, first=first,
+        covers_from=frm, covers_to=to, day=day, stamp=stamp, since=since, first=first,
         relevant_open=relevant_open, sections=sections, health=health, problems=problems,
     )  # fmt: skip
 
 
-# --------------------------------------------------------------------------- email
+# --------------------------------------------------------------------------- files
 
 
-@dataclass(frozen=True)
-class MailSettings:
-    host: str
-    port: int
-    user: str
-    password: str
-    sender: str
-    to: str
-
-    @classmethod
-    def from_env(cls) -> MailSettings:
-        env = os.environ
-        missing = [
-            v for v in ("SCOUT_SMTP_USER", "SCOUT_SMTP_PASSWORD", "SCOUT_MAIL_TO") if not env.get(v)
-        ]
-        if missing:
-            raise DigestError(f"{', '.join(missing)} not set: {SETUP_HINT}")
+def shown(path: Path) -> str:
+    """The path as it is on the box, not inside the container."""
+    base, host = os.environ.get("SCOUT_DIGESTS_DIR"), os.environ.get("SCOUT_DIGESTS_DIR_HOST")
+    if base and host:
         try:
-            port = int(env.get("SCOUT_SMTP_PORT", "587"))
-        except ValueError as e:
-            raise DigestError("SCOUT_SMTP_PORT must be a number (587)") from e
-        user = env["SCOUT_SMTP_USER"].strip()
-        return cls(
-            host=env.get("SCOUT_SMTP_HOST", "smtp.gmail.com").strip(),
-            port=port,
-            user=user,
-            password="".join(env["SCOUT_SMTP_PASSWORD"].split()),
-            sender=env.get("SCOUT_MAIL_FROM", "").strip() or user,
-            to=env["SCOUT_MAIL_TO"].strip(),
-        )
+            return str(Path(host) / path.relative_to(base))
+        except ValueError:
+            pass
+    return str(path)
 
 
-def build_message(
-    settings: MailSettings, subject: str, text: str, html_body: str | None
-) -> EmailMessage:
-    msg = EmailMessage()
-    msg["From"] = f"Scout <{settings.sender}>"
-    msg["To"] = settings.to
-    msg["Subject"] = subject
-    msg["Date"] = formatdate(localtime=False)
-    msg["Message-ID"] = make_msgid(domain=settings.sender.rpartition("@")[2] or "scout.local")
-    msg.set_content(text)
-    if html_body:
-        msg.add_alternative(html_body, subtype="html")
-    return msg
+def _write(path: Path, text: str) -> None:
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.chmod(0o644)
+    tmp.replace(path)
 
 
-def send(settings: MailSettings, msg: EmailMessage, smtp_class=None) -> None:
-    context = ssl.create_default_context()
+def write_files(d: Digest, folder: Path) -> Path:
+    """Write <stamp>.txt/.html and latest.txt/.html; returns the .txt path."""
+    if not folder.is_dir():
+        raise DigestError(f"{shown(folder)} doesn't exist (box-setup §17 creates it)")
+    text, page = d.text(), d.html()
     try:
-        if settings.port == 465:
-            cls = smtp_class or smtplib.SMTP_SSL
-            server = cls(settings.host, settings.port, timeout=30, context=context)
-        else:
-            cls = smtp_class or smtplib.SMTP
-            server = cls(settings.host, settings.port, timeout=30)
-        with server:
-            if settings.port != 465:
-                server.ehlo()
-                server.starttls(context=context)
-                server.ehlo()
-            server.login(settings.user, settings.password)
-            server.send_message(msg, from_addr=settings.user, to_addrs=[settings.to])
-    except smtplib.SMTPAuthenticationError as e:
-        raise DigestError(
-            f"{settings.host} refused the login for {settings.user} ({e.smtp_code}). Check the"
-            " address and the app password in mail.env; a revoked app password needs a new one."
-        ) from e
-    except (smtplib.SMTPException, OSError) as e:
-        raise DigestError(f"sending through {settings.host}:{settings.port} failed: {e}") from e
+        for name, content in (
+            (f"{d.stamp}.txt", text), (f"{d.stamp}.html", page),
+            ("latest.txt", text), ("latest.html", page),
+        ):  # fmt: skip
+            _write(folder / name, content)
+    except OSError as e:
+        raise DigestError(f"can't write to {shown(folder)}: {e.strerror or e}") from e
+    return folder / f"{d.stamp}.txt"
+
+
+def prune(folder: Path, today: datetime, keep_days: int = KEEP_DAYS) -> int:
+    """Delete <stamp>.txt/.html older than keep_days; returns how many files."""
+    removed = 0
+    for f in folder.iterdir():
+        if f.suffix not in (".txt", ".html") or not re.match(STAMP_RE, f.stem):
+            continue
+        try:
+            when = datetime.strptime(f.stem[:10], "%Y-%m-%d").replace(tzinfo=UTC)
+        except ValueError:
+            continue
+        if (today - when).days > keep_days:
+            f.unlink(missing_ok=True)
+            removed += 1
+    return removed
 
 
 # --------------------------------------------------------------------------- command
@@ -463,38 +437,10 @@ def send(settings: MailSettings, msg: EmailMessage, smtp_class=None) -> None:
 
 def run(
     dry_run: bool = False,
-    test_email: bool = False,
     out=print,
     logs_dir: Path | None = None,
-    smtp_class=None,
+    digests_dir: Path | None = None,
 ) -> int:
-    settings = None
-    if not dry_run:
-        try:
-            settings = MailSettings.from_env()
-        except DigestError as e:
-            out(f"ERROR: {e}")
-            return 1
-
-    if test_email:
-        assert settings is not None
-        when = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-        msg = build_message(
-            settings,
-            "Scout: test email",
-            f"If you can read this, Scout's daily digest can reach you.\n\nSent {when} from the"
-            f" box, through {settings.host} as {settings.user}.\n",
-            None,
-        )
-        try:
-            send(settings, msg, smtp_class)
-        except DigestError as e:
-            out(f"ERROR: {e}")
-            return 1
-        out(f"Sent a test email to {settings.to} through {settings.host} as {settings.user}.")
-        out("Not there in a minute or two? Check the spam folder.")
-        return 0
-
     try:
         reader = db.connect("reader")
     except db.DbError as e:
@@ -504,31 +450,33 @@ def run(
         d = gather(reader, logs_dir=logs_dir)
 
     if dry_run:
-        out(f"Subject: {d.subject}")
-        out("")
         out(d.text().rstrip("\n"))
         out("")
-        out("(dry run: nothing sent, nothing recorded)")
+        out("(dry run: nothing written, nothing recorded)")
         return 0
 
-    assert settings is not None
-    msg = build_message(settings, d.subject, d.text(), d.html())
+    folder = digests_dir or Path(os.environ.get("SCOUT_DIGESTS_DIR", "/data/digests"))
     try:
-        send(settings, msg, smtp_class)
+        path = write_files(d, folder)
     except DigestError as e:
         out(f"ERROR: {e}")
         out("Nothing recorded: the next digest will cover this period too.")
         return 1
+    pruned = prune(folder, d.covers_to)
     try:
         with db.connect("ingest") as conn:
             conn.execute(
-                "INSERT INTO digests (covers_from, covers_to, subject, new_relevant, new_possible,"
-                " closed, suspicious, problems) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (d.covers_from, d.covers_to, d.subject, d.count(NEW), d.count(POSSIBLE),
+                "INSERT INTO digests (covers_from, covers_to, title, file, new_relevant,"
+                " new_possible, closed, suspicious, problems)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (d.covers_from, d.covers_to, d.title, path.name, d.count(NEW), d.count(POSSIBLE),
                  d.count(CLOSED), d.count(SUSPICIOUS), len(d.problems)),
             )  # fmt: skip
     except db.DbError as e:
-        out(f"Sent, but couldn't record it ({e}); the next digest will repeat this period.")
+        out(f"Written, but couldn't record it ({e}); the next digest will repeat this period.")
         return 1
-    out(f"Sent: {d.subject} (to {settings.to})")
+    out(f"{d.title}")
+    out(f"Written: {shown(path)} (and latest.txt / latest.html)")
+    if pruned:
+        out(f"Deleted {pruned} digest file(s) older than {KEEP_DAYS} days.")
     return 0

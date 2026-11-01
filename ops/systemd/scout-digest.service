@@ -1,6 +1,6 @@
 # Installed by ops/systemd/install.sh, which fills in @USER@, @SCOUT_HOME@ and @DOCKER@.
 [Unit]
-Description=Scout: send the daily digest email
+Description=Scout: write the daily digest
 Documentation=file://@SCOUT_HOME@/code/docs/box-setup.md
 Requires=docker.service
 After=docker.service network-online.target

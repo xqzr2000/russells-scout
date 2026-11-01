@@ -101,15 +101,15 @@ def run(out=print, limit: int = 10) -> int:
                 + (f"  ({notes})" if notes else ""))  # fmt: skip
 
         last_digest = one(
-            "SELECT to_char(sent_at AT TIME ZONE %s, 'YYYY-MM-DD HH24:MI'), new_relevant,"
-            " problems FROM digests ORDER BY id DESC LIMIT 1",
+            "SELECT to_char(made_at AT TIME ZONE %s, 'YYYY-MM-DD HH24:MI'), new_relevant,"
+            " problems, file FROM digests ORDER BY id DESC LIMIT 1",
             tz,
         )
         if last_digest:
-            when, new, problems = last_digest
-            out(f"  last digest sent {when}: {new} new job(s), {problems} problem(s)")
+            when, new, problems, file = last_digest
+            out(f"  last digest {when}: {new} new job(s), {problems} problem(s) ({file})")
         else:
-            out("  no digest sent yet")
+            out("  no digest written yet")
 
         trouble = rows(
             "SELECT name, status, consecutive_failures, last_outcome, last_error"

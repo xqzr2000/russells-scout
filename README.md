@@ -13,7 +13,7 @@ Full design: [docs/architecture-plan.md](docs/architecture-plan.md) (v3.2).
 |---|---|---|
 | 0 | Claude Code on DeepSeek in a hardened container on the box; locked rules; smoke tests; capability tests | **done: GO** (2026-10-29). 26/26 smoke, capability tests 3/3 on repair and operator; `deepseek-flash` at low effort ([results](docs/phase0-results.md), [box setup](docs/box-setup.md)) |
 | 1 | Scouting slice: WorkBC job board search, Postgres, Ashby/Greenhouse/Lever enrichment, dedupe, trust scoring (zero tokens) | **done** (2026-10-31): 175 postings, 25 job boards, all exit criteria met ([results](docs/phase1-results.md), [box setup §12–15](docs/box-setup.md#12-database-phase-1-box-once)) |
-| 2 | Scout runtime, daily digest, WSL2 sync, backups | in progress: timers and backups running; daily digest built ([plan](docs/phase2-plan.md), [box setup §16–17](docs/box-setup.md#16-running-on-its-own-timers-and-backups-phase-2-box)) |
+| 2 | Scout runtime, daily digest, WSL2 sync, backups | in progress: timers and backups running; daily digest file built ([plan](docs/phase2-plan.md), [box setup §16–17](docs/box-setup.md#16-running-on-its-own-timers-and-backups-phase-2-box)) |
 | 3 | The agent takes over (sessions on a timer, `CLAUDE.md`, local git repo) | |
 | 4–5 | Discovery and long-run hardening | |
 

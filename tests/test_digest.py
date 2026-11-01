@@ -1,130 +1,14 @@
-"""Tests for the daily digest (tasks 2.3–2.4). Database tests run with SCOUT_TEST_DB=1.
-
-No real email is sent: a fake SMTP class records what would have gone out.
-"""
+"""Tests for the daily digest (task 2.3). Database tests run with SCOUT_TEST_DB=1."""
 
 from __future__ import annotations
 
 import os
-import smtplib
-import typing
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from scout import db, digest
-from scout.digest import CLOSED, NEW, POSSIBLE, SUSPICIOUS, Digest, Job, MailSettings, Section
-
-MAIL_ENV = {
-    "SCOUT_SMTP_USER": "russell.scout@gmail.com",
-    "SCOUT_SMTP_PASSWORD": "abcd efgh ijkl mnop",
-    "SCOUT_MAIL_TO": "russell@example.com",
-}
-
-
-class FakeSMTP:
-    """Stands in for smtplib.SMTP; remembers every instance."""
-
-    sent: typing.ClassVar[list] = []
-    calls: typing.ClassVar[list] = []
-    fail_login = False
-    fail_send = False
-
-    def __init__(self, host, port, timeout=None, context=None):
-        FakeSMTP.calls.append(("connect", host, port))
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        FakeSMTP.calls.append(("quit",))
-
-    def ehlo(self):
-        FakeSMTP.calls.append(("ehlo",))
-
-    def starttls(self, context=None):
-        FakeSMTP.calls.append(("starttls",))
-
-    def login(self, user, password):
-        FakeSMTP.calls.append(("login", user, password))
-        if FakeSMTP.fail_login:
-            raise smtplib.SMTPAuthenticationError(535, b"5.7.8 Username and Password not accepted")
-
-    def send_message(self, msg, from_addr=None, to_addrs=None):
-        if FakeSMTP.fail_send:
-            raise smtplib.SMTPServerDisconnected("connection closed")
-        FakeSMTP.calls.append(("send", from_addr, tuple(to_addrs)))
-        FakeSMTP.sent.append(msg)
-
-
-@pytest.fixture(autouse=True)
-def fresh_fake():
-    FakeSMTP.sent, FakeSMTP.calls = [], []
-    FakeSMTP.fail_login = FakeSMTP.fail_send = False
-
-
-@pytest.fixture
-def mail_env(monkeypatch):
-    for k, v in MAIL_ENV.items():
-        monkeypatch.setenv(k, v)
-    for k in ("SCOUT_SMTP_HOST", "SCOUT_SMTP_PORT", "SCOUT_MAIL_FROM"):
-        monkeypatch.delenv(k, raising=False)
-
-
-# --------------------------------------------------------------------------- settings, sending
-
-
-def test_settings_defaults_and_password_spaces(mail_env):
-    s = MailSettings.from_env()
-    assert (s.host, s.port) == ("smtp.gmail.com", 587)
-    assert s.password == "abcdefghijklmnop"
-    assert s.sender == s.user == "russell.scout@gmail.com"
-    assert s.to == "russell@example.com"
-
-
-def test_settings_missing_says_how_to_fix(monkeypatch):
-    for k in MAIL_ENV:
-        monkeypatch.delenv(k, raising=False)
-    with pytest.raises(digest.DigestError, match="make-mail-env.sh"):
-        MailSettings.from_env()
-
-
-def test_send_uses_starttls_then_login(mail_env):
-    s = MailSettings.from_env()
-    msg = digest.build_message(s, "subject", "body\n", "<p>body</p>")
-    digest.send(s, msg, smtp_class=FakeSMTP)
-    kinds = [c[0] for c in FakeSMTP.calls]
-    assert kinds.index("starttls") < kinds.index("login") < kinds.index("send")
-    assert ("login", "russell.scout@gmail.com", "abcdefghijklmnop") in FakeSMTP.calls
-    assert ("send", "russell.scout@gmail.com", ("russell@example.com",)) in FakeSMTP.calls
-    sent = FakeSMTP.sent[0]
-    assert sent["From"] == "Scout <russell.scout@gmail.com>"
-    assert sent.get_body(("plain",)).get_content() == "body\n"
-    assert "<p>body</p>" in sent.get_body(("html",)).get_content()
-
-
-def test_rejected_login_is_explained(mail_env):
-    FakeSMTP.fail_login = True
-    s = MailSettings.from_env()
-    with pytest.raises(digest.DigestError, match="app password"):
-        digest.send(s, digest.build_message(s, "x", "y", None), smtp_class=FakeSMTP)
-
-
-def test_test_email_needs_no_database(mail_env, monkeypatch):
-    monkeypatch.setenv("SCOUT_READER_PASSWORD", "")  # a database connection would fail
-    lines: list[str] = []
-    assert digest.run(test_email=True, out=lines.append, smtp_class=FakeSMTP) == 0
-    assert FakeSMTP.sent[0]["Subject"] == "Scout: test email"
-    assert "Sent a test email to russell@example.com" in lines[0]
-
-
-def test_test_email_without_settings_fails_clearly(monkeypatch):
-    for k in MAIL_ENV:
-        monkeypatch.delenv(k, raising=False)
-    lines: list[str] = []
-    assert digest.run(test_email=True, out=lines.append, smtp_class=FakeSMTP) == 1
-    assert "SCOUT_SMTP_USER" in lines[0] and not FakeSMTP.sent
-
+from scout.digest import CLOSED, NEW, POSSIBLE, SUSPICIOUS, Digest, Job, Section
 
 # --------------------------------------------------------------------------- rendering
 
@@ -137,7 +21,7 @@ def sample_digest(problems=None) -> Digest:
         Job("Data <Scientist> & co", "A&B", "Burnaby", None),
     ]  # fmt: skip
     return Digest(
-        covers_from=now - timedelta(days=1), covers_to=now, day="Sun Nov 1",
+        covers_from=now - timedelta(days=1), covers_to=now, day="Sun Nov 1", stamp="2026-11-01-0710",
         since="Sat Oct 31 07:10", first=False, relevant_open=150,
         sections=[
             Section(NEW, "strong", new, 30),
@@ -149,16 +33,17 @@ def sample_digest(problems=None) -> Digest:
     )  # fmt: skip
 
 
-def test_subject_counts():
-    assert sample_digest().subject == "Scout: 30 new jobs, 0 suspicious (Sun Nov 1)"
+def test_title_counts():
+    assert sample_digest().title == "Scout: 30 new jobs, 0 suspicious (Sun Nov 1)"
     d = sample_digest(problems=["x"])
-    assert d.subject == "Scout: 30 new jobs, 0 suspicious, 1 problem (Sun Nov 1)"
+    assert d.title == "Scout: 30 new jobs, 0 suspicious, 1 problem (Sun Nov 1)"
     d.sections[0].total = 0
-    assert d.subject.startswith("Scout: no new jobs,")
+    assert d.title.startswith("Scout: no new jobs,")
 
 
 def test_text_lists_jobs_links_and_more():
     t = sample_digest(problems=["The last backup failed: x"]).text()
+    assert t.startswith("Scout: 30 new jobs, 0 suspicious, 1 problem (Sun Nov 1)\n\n")
     assert "since Sat Oct 31 07:10" in t
     assert "NEEDS YOUR ATTENTION\n  ! The last backup failed: x" in t
     assert "AI Engineer — Remarcable, Inc. — Vancouver (hybrid) — CAD 120,000–150,000" in t
@@ -172,6 +57,40 @@ def test_html_escapes_and_links():
     assert '<a href="https://jobs.ashbyhq.com/remarcable-inc/x">AI Engineer</a>' in h
     assert "Data &lt;Scientist&gt; &amp; co" in h and "A&amp;B" in h
     assert "<Scientist>" not in h
+    assert '<meta charset="utf-8">' in h
+
+
+def test_files_written_and_latest_replaced(tmp_path):
+    d = sample_digest()
+    path = digest.write_files(d, tmp_path)
+    assert path.name == "2026-11-01-0710.txt"
+    names = sorted(p.name for p in tmp_path.iterdir())
+    assert names == ["2026-11-01-0710.html", "2026-11-01-0710.txt", "latest.html", "latest.txt"]
+    assert (tmp_path / "latest.txt").read_text() == path.read_text() == d.text()
+    assert oct(path.stat().st_mode & 0o777) == "0o644"
+    d.stamp, d.day = "2026-11-02-0710", "Mon Nov 2"
+    digest.write_files(d, tmp_path)
+    assert "(Mon Nov 2)" in (tmp_path / "latest.txt").read_text()
+    assert len(list(tmp_path.glob("2026-*.txt"))) == 2
+
+
+def test_missing_folder_is_explained(tmp_path):
+    with pytest.raises(digest.DigestError, match="doesn't exist"):
+        digest.write_files(sample_digest(), tmp_path / "nope")
+
+
+def test_prune_keeps_90_days_and_other_files(tmp_path):
+    for name in ("2026-07-01-0710.txt", "2026-07-01-0710.html", "2026-08-15-0710.txt",
+                 "latest.txt", "notes.txt", "2026-07-01-0710.md"):  # fmt: skip
+        (tmp_path / name).write_text("x")
+    removed = digest.prune(tmp_path, datetime(2026, 11, 1, tzinfo=UTC))
+    assert removed == 2
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "2026-07-01-0710.md",
+        "2026-08-15-0710.txt",
+        "latest.txt",
+        "notes.txt",
+    ]
 
 
 # --------------------------------------------------------------------------- health files
@@ -269,44 +188,46 @@ def test_first_digest_covers_the_last_24_hours(data, tmp_path):
 
 
 @needs_db
-def test_sent_digest_is_recorded_and_the_next_starts_after_it(data, mail_env, tmp_path):
+def test_digest_is_written_recorded_and_the_next_starts_after_it(data, tmp_path):
+    logs, out_dir = tmp_path / "logs", tmp_path / "digests"
+    logs.mkdir()
+    out_dir.mkdir()
     lines: list[str] = []
-    assert digest.run(out=lines.append, logs_dir=tmp_path, smtp_class=FakeSMTP) == 0, lines
-    assert FakeSMTP.sent[0]["Subject"].startswith("Scout: 2 new jobs, 1 suspicious, 1 problem (")
-    assert FakeSMTP.sent[0]["To"] == "russell@example.com"
+    assert digest.run(out=lines.append, logs_dir=logs, digests_dir=out_dir) == 0, lines
+    assert lines[0].startswith("Scout: 2 new jobs, 1 suspicious, 1 problem (")
+    first = (out_dir / "latest.txt").read_text()
+    assert "AI Engineer — Acme" in first
     with db.connect("reader") as c:
-        row = c.execute(
-            "SELECT new_relevant, new_possible, closed, suspicious, problems FROM digests"
+        rows = c.execute(
+            "SELECT new_relevant, new_possible, closed, suspicious, problems, file FROM digests"
         ).fetchall()
-    assert row == [(2, 1, 1, 1, 1)]
+    assert rows[0][:5] == (2, 1, 1, 1, 1) and rows[0][5].endswith(".txt")
+    assert (out_dir / rows[0][5]).exists()
 
     with db.connect("ingest", autocommit=True) as c:
         add_posting(c, "Machine Learning Engineer", 0)
-    assert digest.run(out=lines.append, logs_dir=tmp_path, smtp_class=FakeSMTP) == 0
-    second = FakeSMTP.sent[1]
-    assert second["Subject"].startswith("Scout: 1 new job, 0 suspicious,")
-    assert "Machine Learning Engineer" in second.get_body(("plain",)).get_content()
-    assert "AI Engineer —" not in second.get_body(("plain",)).get_content()
+    assert digest.run(out=lines.append, logs_dir=logs, digests_dir=out_dir) == 0
+    second = (out_dir / "latest.txt").read_text()
+    assert second.startswith("Scout: 1 new job, 0 suspicious,")
+    assert "Machine Learning Engineer" in second and "AI Engineer —" not in second
 
 
 @needs_db
-def test_failed_send_records_nothing(data, mail_env, tmp_path):
-    FakeSMTP.fail_send = True
+def test_failed_write_records_nothing(data, tmp_path):
     lines: list[str] = []
-    assert digest.run(out=lines.append, logs_dir=tmp_path, smtp_class=FakeSMTP) == 1
+    assert digest.run(out=lines.append, logs_dir=tmp_path, digests_dir=tmp_path / "nope") == 1
     assert "Nothing recorded" in lines[-1]
     with db.connect("reader") as c:
         assert c.execute("SELECT count(*) FROM digests").fetchone()[0] == 0
 
 
 @needs_db
-def test_dry_run_prints_and_records_nothing(data, monkeypatch, tmp_path):
-    for k in MAIL_ENV:
-        monkeypatch.delenv(k, raising=False)  # not needed for a dry run
+def test_dry_run_prints_and_records_nothing(data, tmp_path):
     lines: list[str] = []
-    assert digest.run(dry_run=True, out=lines.append, logs_dir=tmp_path) == 0
-    assert lines[0].startswith("Subject: Scout: 2 new jobs")
-    assert lines[-1] == "(dry run: nothing sent, nothing recorded)"
+    assert digest.run(dry_run=True, out=lines.append, logs_dir=tmp_path, digests_dir=tmp_path) == 0
+    assert lines[0].startswith("Scout: 2 new jobs")
+    assert lines[-1] == "(dry run: nothing written, nothing recorded)"
+    assert list(tmp_path.iterdir()) == []
     with db.connect("reader") as c:
         assert c.execute("SELECT count(*) FROM digests").fetchone()[0] == 0
 
@@ -323,4 +244,4 @@ def test_no_good_sweep_is_a_problem(clean_db, tmp_path):
         d = digest.gather(c, logs_dir=tmp_path)
     assert d.health[0].startswith("sweeps: 0 of 1 ok in the last 24 hours")
     assert any(p.startswith("No successful sweep in the last 24 hours") for p in d.problems)
-    assert d.subject.startswith("Scout: no new jobs, 0 suspicious, 2 problems")
+    assert d.title.startswith("Scout: no new jobs, 0 suspicious, 2 problems")

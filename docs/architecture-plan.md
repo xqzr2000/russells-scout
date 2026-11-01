@@ -418,6 +418,9 @@ career pages; Firecrawl and Tavily remain deferred.
 
 ## 10. Daily Email Digest
 
+> **2026-10-31:** no email after all. The digest below is written to files on the box instead
+> ([phase2-plan.md](phase2-plan.md) §3, §5); there is no mailer and no immediate alert.
+
 Built by the supervisor with no LLM; sent by the mailer to a fixed address (SMTP credentials never in the agent container).
 
 Contents:
@@ -598,7 +601,7 @@ SSH: key-only login for `shaw2012`, LAN-only firewall, fixed address. A separate
 
 **Other open items**
 - Groq or other fallback provider: would need an Anthropic-compatible route; dropped for now.
-- ~~SMTP provider for the digest~~ — resolved 2026-10-31: a Gmail account with an app password ([phase2-plan.md](phase2-plan.md) §5).
+- ~~SMTP provider for the digest~~ — resolved 2026-10-31: no email; the digest is a file on the box ([phase2-plan.md](phase2-plan.md) §5).
 - ~~Initial list of Vancouver employers and their ATS~~ — resolved 2026-10-30: employers are discovered from WorkBC postings.
 - ~~Search criteria~~ — resolved 2026-10-30: initial terms and area in [phase1-plan.md](phase1-plan.md) §2.
 - ~~Exact managed-settings path and hook set~~ — resolved in Phase 0: `/etc/claude-code/managed-settings.json` in the container, from `/srv/scout/policy/` on the host.
@@ -635,6 +638,16 @@ SSH: key-only login for `shaw2012`, LAN-only firewall, fixed address. A separate
 - Enrichment in Phase 1: Ashby, Greenhouse, Lever (public APIs). Workday and custom sites go to
   the agent in Phase 3.
 - WorkBC data is for private use only; never republished.
+
+### Decisions log (2026-10-31) — Phase 2
+
+- Scheduling by systemd timers on the host (sweeps 06:40 and 16:40, backup 03:30, digest 07:10),
+  not an always-on scheduler container.
+- Nightly `pg_dump` with a restore check; 14 daily + 8 Sunday dumps kept.
+- **No email.** Gmail app passwords weren't available for Russell's account, so the daily
+  digest (§10) is written to files in `/srv/scout/logs/digests` and read by hand (or from the
+  WSL2 copy). The mailer and the immediate alerts (§10, §11) are dropped; problems go at the top
+  of the digest. Push notifications (counts only) remain possible later.
 
 ### First milestone
 

@@ -488,21 +488,21 @@ It replaces what's in the database with the backup's contents.
 
 ---
 
-## 17. Daily digest email (Phase 2, box and browser)
+## 17. Daily digest (Phase 2, box)
 
-Every morning at 07:10 (after the 06:40 sweep) Scout emails you what's new since the last
-digest: relevant jobs with links to the employer's own posting, possible matches, jobs that
+Every morning at 07:10 (after the 06:40 sweep) Scout writes a digest of what's new since the
+last one: relevant jobs with links to the employer's own posting, possible matches, jobs that
 closed, anything suspicious, and a health check (sweeps, sources, backup, sync, disk). Problems
-go at the top and are counted in the subject. A digest that fails to send isn't lost: the next
-one covers its period too.
+go at the top and are counted in the first line. Nothing is emailed; you read it yourself. A
+digest that fails isn't lost: the next one covers its period too.
 
-It's sent through your Gmail account with an **app password**: a separate 16-letter password
-that Google makes for one app. It can't be used to sign in to your Google account, but it can
-send and read mail, so treat it like a password. You can delete it any time without changing
-your real password. It's stored only in `/srv/scout/secrets/mail.env` (mode 600, never in git),
-which only the `digest` container gets.
+**Once:** the folder it writes to (the digest container runs as uid 10002, like the sweeps):
 
-**1. Update the box and preview a digest** (no email needed yet):
+```bash
+sudo install -d -o 10002 -g $(id -gn) -m 2775 /srv/scout/logs/digests
+```
+
+**Update the box, then preview and write the first digest:**
 
 ```bash
 cd /srv/scout/code && git pull --ff-only
@@ -511,53 +511,37 @@ docker compose --profile scout run --rm scout db migrate
 docker compose --profile scout run --rm scout db check
 ops/backup.sh            # also leaves a copy of its status where the digest can read it
 docker compose --profile scout run --rm digest digest --dry-run
+docker compose --profile scout run --rm digest digest
+ls -l /srv/scout/logs/digests
 ```
 
 `db migrate` applies `0005_digests.sql`; `db check` should pass everything. The dry run prints
-the email it would send (the first one covers the last 24 hours).
+the digest without saving it; the next command writes it (the first one covers the last 24
+hours). Expect four files: `<date>-<time>.txt` and `.html`, and `latest.txt` and `latest.html`.
 
-**2. Turn on 2-Step Verification** (browser, signed in to the Gmail account; skip if it's
-already on). Go to <https://myaccount.google.com/security>, find **How you sign in to Google**,
-click **2-Step Verification** and follow the steps. Google only offers app passwords once this
-is on.
-
-**3. Create the app password.** Go to <https://myaccount.google.com/apppasswords> (Google may
-ask for your password again). Under **App name** type `Scout box`, click **Create**. Google
-shows a 16-letter password in four groups of four. Copy it now: it's shown only once. Click
-**Done**. (If the page says the setting isn't available, 2-Step Verification isn't on yet, or
-the account signs in only with security keys.)
-
-**4. Save it on the box** (the password doesn't show while you paste it):
-
-```bash
-cd /srv/scout/code
-ops/mail/make-mail-env.sh
-```
-
-It asks for the Gmail address, where to send the digest (press Enter for the same address, or
-type another, such as your iCloud address) and the app password.
-
-**5. Send a test email, then a real digest:**
-
-```bash
-docker compose --profile scout run --rm digest digest --test-email
-docker compose --profile scout run --rm digest digest
-```
-
-Each should arrive within a minute or two; check spam the first time and mark it "not spam".
-Digests also appear in the Gmail account's **Sent** folder.
-
-**6. Install the digest timer** (adds `scout-digest.timer` next to the other two):
+**Add the digest timer** (it joins the sweep and backup timers):
 
 ```bash
 sudo ops/systemd/install.sh
 systemctl list-timers 'scout-*'
 ```
 
-Day to day: `journalctl -u scout-digest -n 30` shows the last send; `scout status` shows when
-the last digest went out. To stop the emails: `sudo systemctl disable --now scout-digest.timer`.
-To change the address or password: `ops/mail/make-mail-env.sh --replace`. To cut Scout off from
-the account: delete "Scout box" on the app passwords page.
+**Reading it.** On the box, or from WSL2 without logging in:
+
+```bash
+cat /srv/scout/logs/digests/latest.txt                  # on the box
+ssh scoutbox cat /srv/scout/logs/digests/latest.txt     # from WSL2
+ssh scoutbox ls /srv/scout/logs/digests                 # earlier days
+```
+
+Check the date on the first line: if it isn't today's, the 07:10 run didn't happen
+(`journalctl -u scout-digest -n 30`). The `.html` version has clickable links; once the WSL2
+sync (step 18, coming) runs, the files are on your PC and open in a Windows browser. Until then
+you can copy one over from WSL2:
+`scp scoutbox:/srv/scout/logs/digests/latest.html /mnt/c/Users/<you>/Downloads/`.
+
+Digest files older than 90 days are deleted automatically. `scout status` shows when the last
+digest was written. To stop the daily digest: `sudo systemctl disable --now scout-digest.timer`.
 
 ---
 
@@ -631,8 +615,7 @@ Revoke the DeepSeek key on the console if you're not reusing it.
 | `… was edited after it was applied` | A migration file changed on GitHub. Applied migrations are never edited; put the change in a new numbered file. |
 | `systemctl list-timers` shows no `scout-` timers | `sudo ops/systemd/install.sh` (step 16), from `/srv/scout/code`. |
 | A timer's run failed | `journalctl -u scout-sweep -n 50 --no-pager` (or `scout-backup`). `docker: permission denied … docker.sock`: your account isn't in the `docker` group (`groups`); the timers run as you. |
-| `SCOUT_SMTP_USER, … not set` from `digest` | `mail.env` is missing: step 17.4 (`ops/mail/make-mail-env.sh`). |
-| `smtp.gmail.com refused the login … (535)` | Wrong address or app password, or the app password was deleted. Make a new one (17.3) and run `ops/mail/make-mail-env.sh --replace`. |
+| `digest`: `… logs/digests doesn't exist` or `can't write` | Create the folder: the `install -d` line in step 17. |
 | The digest says "No database backup has been recorded" | Run `ops/backup.sh` once by hand; from then on the 03:30 timer keeps it current. |
 | `backup: FAILED: … doesn't exist` | Create the folder: the `install -d` line in step 16. |
 | `backup: FAILED: the dump doesn't restore` | The dump is kept in `/srv/scout/backups` for a look; earlier dumps are untouched. Paste `journalctl -u scout-backup -n 50`. |
