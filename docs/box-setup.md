@@ -450,7 +450,7 @@ the last 8 Sundays.
 
 ```bash
 sudo ops/systemd/install.sh
-systemctl list-timers 'scout-*'
+systemctl list-timers 'scout-*' --no-pager
 ```
 
 Expect two lines, `scout-sweep.timer` and `scout-backup.timer`, with their next run times.
@@ -471,7 +471,7 @@ Day to day:
 
 | To | Run |
 |---|---|
-| See when jobs run next, and last ran | `systemctl list-timers 'scout-*'` |
+| See when jobs run next, and last ran | `systemctl list-timers 'scout-*' --no-pager` |
 | Read a sweep's or backup's output | `journalctl -u scout-sweep --since today` (or `-u scout-backup`) |
 | See whether the last run failed | `systemctl status scout-sweep.service scout-backup.service --no-pager` |
 | Pause the sweeps (stays paused across reboots) | `sudo systemctl disable --now scout-sweep.timer` |
@@ -515,7 +515,7 @@ docker compose --profile scout run --rm digest digest
 ls -l /srv/scout/logs/digests
 ```
 
-`db migrate` applies `0005_digests.sql`; `db check` should pass everything. The dry run prints
+`db migrate` applies `0005_digests.sql` and `0006_digest_files.sql` (or just 0006, if 0005 is already in); `db check` should pass everything. The dry run prints
 the digest without saving it; the next command writes it (the first one covers the last 24
 hours). Expect four files: `<date>-<time>.txt` and `.html`, and `latest.txt` and `latest.html`.
 
@@ -523,7 +523,7 @@ hours). Expect four files: `<date>-<time>.txt` and `.html`, and `latest.txt` and
 
 ```bash
 sudo ops/systemd/install.sh
-systemctl list-timers 'scout-*'
+systemctl list-timers 'scout-*' --no-pager
 ```
 
 **Reading it.** On the box, or from WSL2 without logging in:
@@ -536,12 +536,97 @@ ssh scoutbox ls /srv/scout/logs/digests                 # earlier days
 
 Check the date on the first line: if it isn't today's, the 07:10 run didn't happen
 (`journalctl -u scout-digest -n 30`). The `.html` version has clickable links; once the WSL2
-sync (step 18, coming) runs, the files are on your PC and open in a Windows browser. Until then
+sync (step 18) runs, the files are on your PC and open in a Windows browser. Until then
 you can copy one over from WSL2:
 `scp scoutbox:/srv/scout/logs/digests/latest.html /mnt/c/Users/<you>/Downloads/`.
 
 Digest files older than 90 days are deleted automatically. `scout status` shows when the last
 digest was written. To stop the daily digest: `sudo systemctl disable --now scout-digest.timer`.
+
+---
+
+## 18. Copies on your PC: the WSL2 sync (Phase 2, WSL2, box and Windows)
+
+Every 6 hours, and when you log in to Windows, WSL2 pulls copies of the backups and the daily
+digests from the box into `~/scout-mirror/` (`backups/`, `digests/`, `sync.log`). It uses its
+own SSH key, which the box lets do exactly one thing: download those two folders, read-only.
+It can't open a shell, run commands, upload or read anything else, even if the key leaked. The
+copy never deletes anything, so a wiped box can't wipe your copies. Each pull is noted on the
+box, and the digest's health section shows "sync to WSL2: N hours ago".
+
+**1. WSL2: make the sync key** (no passphrase, so it can run unattended; it can't do anything
+but download):
+
+```bash
+ssh-keygen -t ed25519 -N "" -C scout-sync -f ~/.ssh/scout_sync
+```
+
+Add this to `~/.ssh/config` in WSL2, next to the `scoutbox` entry from step 0, with the same
+`HostName`:
+
+```
+Host scoutbox-sync
+    HostName 192.168.x.x
+    User shaw2012
+    IdentityFile ~/.ssh/scout_sync
+    IdentitiesOnly yes
+```
+
+**2. Let the key in on the box** (from WSL2, using your normal key):
+
+```bash
+ssh scoutbox "/srv/scout/code/ops/sync/add-sync-key.sh '$(cat ~/.ssh/scout_sync.pub)'"
+```
+
+Expect `added the scout-sync key to /home/shaw2012/.ssh/authorized_keys; it can only run …`.
+
+**3. WSL2: get the pull script and run it once:**
+
+```bash
+mkdir -p ~/scout-mirror
+scp scoutbox:/srv/scout/code/ops/sync/pull-from-box.sh ~/scout-mirror/
+chmod +x ~/scout-mirror/pull-from-box.sh
+~/scout-mirror/pull-from-box.sh
+ls ~/scout-mirror/backups ~/scout-mirror/digests
+```
+
+Expect `backups: ok` and `digests: ok`. (If `rsync` is missing in WSL2:
+`sudo apt install rsync`.)
+
+**4. WSL2: check the key can't do anything else.** Each of these should print
+`scout-sync: refused: …`:
+
+```bash
+ssh scoutbox-sync
+ssh scoutbox-sync 'cat /etc/passwd'
+rsync -r scoutbox-sync:secrets/ /tmp/nope
+```
+
+**5. Windows: schedule it.** Open **PowerShell as administrator** (Start menu, type
+"PowerShell", right-click, *Run as administrator*) and paste:
+
+```powershell
+$action   = New-ScheduledTaskAction -Execute "wsl.exe" -Argument '-e bash -lc "~/scout-mirror/pull-from-box.sh"'
+$every6h  = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddHours(1) -RepetitionInterval (New-TimeSpan -Hours 6) -RepetitionDuration (New-TimeSpan -Days 3650)
+$atLogon  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+Register-ScheduledTask -TaskName "Scout sync" -Action $action -Trigger $every6h,$atLogon -Settings $settings
+Start-ScheduledTask -TaskName "Scout sync"
+```
+
+A console window flashes briefly each time it runs; that's the pull. `-StartWhenAvailable`
+makes a run missed while the PC was off or asleep happen as soon as it's back. The task uses
+your default WSL distro (`wsl -l -v` marks it with `*`), the one where you did steps 1–3.
+
+Check a minute later, in WSL2: `tail -n 3 ~/scout-mirror/sync.log`. On the box, the time of the
+last pull: `cat /srv/scout/logs/sync/last-sync`.
+
+**Reading the digest on Windows:** from WSL2,
+`explorer.exe "$(wslpath -w ~/scout-mirror/digests/latest.html)"` opens it in your browser with
+clickable links. Or in File Explorer: `\\wsl.localhost\<distro>\home\<you>\scout-mirror\digests`.
+
+To stop: `Unregister-ScheduledTask -TaskName "Scout sync"` in PowerShell (as administrator), and
+on the box `/srv/scout/code/ops/sync/add-sync-key.sh --remove`.
 
 ---
 
@@ -617,6 +702,9 @@ Revoke the DeepSeek key on the console if you're not reusing it.
 | A timer's run failed | `journalctl -u scout-sweep -n 50 --no-pager` (or `scout-backup`). `docker: permission denied … docker.sock`: your account isn't in the `docker` group (`groups`); the timers run as you. |
 | `digest`: `… logs/digests doesn't exist` or `can't write` | Create the folder: the `install -d` line in step 17. |
 | The digest says "No database backup has been recorded" | Run `ops/backup.sh` once by hand; from then on the 03:30 timer keeps it current. |
+| `scoutbox-sync`: `Permission denied (publickey)` | Step 18.2 not done, or done with another key. Run it again; check `IdentityFile ~/.ssh/scout_sync` in `~/.ssh/config`. |
+| `scout-sync: refused: …` | Working as intended for anything but the two downloads. For the pull itself, check the folder names in the script are `backups/` and `digests/`. |
+| `sync.log` shows `FAILED` | Box off or asleep, or not reachable from the PC: the next run catches up. Run `~/scout-mirror/pull-from-box.sh` by hand to see the error. |
 | `backup: FAILED: … doesn't exist` | Create the folder: the `install -d` line in step 16. |
 | `backup: FAILED: the dump doesn't restore` | The dump is kept in `/srv/scout/backups` for a look; earlier dumps are untouched. Paste `journalctl -u scout-backup -n 50`. |
 | `Permission denied` in `/workspace` | `sudo chown 10001 /srv/scout/workspace` |
@@ -626,6 +714,5 @@ Revoke the DeepSeek key on the console if you're not reusing it.
 
 - A firewall rule so the agent container can't reach your home LAN at the network level
   (today only the hook blocks LAN addresses by text). Acceptance test 10.
-- Health alerts and the WSL2 sync job (rest of Phase 2, [phase2-plan.md](phase2-plan.md)).
 - Host timer for agent sessions, `CLAUDE.md` for the agent and the agent's local git repo
   (Phase 3).
