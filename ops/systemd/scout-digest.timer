@@ -1,6 +1,6 @@
 # Installed by ops/systemd/install.sh.
 [Unit]
-Description=Scout: digest email every morning, after the 06:40 sweep
+Description=Scout: digest every morning, after the 06:40 sweep
 
 [Timer]
 OnCalendar=*-*-* 07:10:00 America/Vancouver
