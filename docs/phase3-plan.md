@@ -20,7 +20,7 @@ Scouting still uses zero tokens. Only agent sessions call DeepSeek.
  timer 10:20 ─► agent/session.sh ─► agent container ─► /workspace/repo   (agent's git repo,
    (host)        gate · briefing      Claude Code        branches agent/*)
                                       on DeepSeek       /workspace/notes  (handoff, journal)
-                                                         /workspace/outbox/agent.bundle
+                                    after-step (no LLM) ─► /srv/scout/agent-outbox/agent.bundle
                                                               │ WSL2 sync (read-only key)
                                                               ▼
  you attach agent.bundle in chat ─► Claude pushes the branch, opens a PR, reviews it
@@ -78,9 +78,10 @@ Mine (say if you want any changed):
 
      The next session starts from these notes, not from memory. They're kept short to save
      tokens.
-   - `outbox/`: `agent.bundle` and a copy of the notes. This is the only folder the sync key can
-     read. It holds regular files only; `session.sh` refuses symlinks, so nothing in it can
-     point at a host path.
+   - The outbox is **not** in the workspace. `/srv/scout/agent-outbox` holds `agent.bundle`, a
+     manifest and a copy of the notes. It's mounted only into the no-LLM after-step, never into
+     a session, so the agent can't write to it. The sync key can read it, but only real files
+     come through: the gate refuses a symlinked folder, and the WSL2 pull skips links.
    - `scratch/`, `.venv/`: downloaded samples and Python packages, never committed.
 8. **What the agent may change:**
    - **Yes:** `src/scout/sources/`, `src/scout/enrich.py`, `src/scout/pipeline/links.py`,
@@ -128,8 +129,8 @@ What `agent/session.sh` does on the host (as `shaw2012`, by timer or by hand):
    `origin/main` before every session after that.
 5. **Session:** `agent/run-session.sh` with a short fixed prompt ("start your session") plus the
    task id, and the limits from §2.12. The rules come from the locked `CLAUDE.md`.
-6. **After:** another no-LLM command in the container (`workspace-step.sh after`) rebuilds
-   `outbox/`:
+6. **After:** another no-LLM command in the container (`workspace-step.sh after`), the only
+   one that mounts `/srv/scout/agent-outbox` (as `/outbox`), rebuilds the outbox:
    - `agent.bundle` with every `agent/*` branch;
    - `manifest.txt` listing each branch and its head commit;
    - copies of the notes.
@@ -170,7 +171,7 @@ A new **Agent** part of the health section:
 | Task | Who | What | Done when |
 |---|---|---|---|
 | 3.1 | Claude | **Built** (PR #19). **Workspace and rules:** locked `CLAUDE.md`; mounts (`/src/main`, `/briefing`); `agent/session.sh` (lock, gate, briefing, after-step); `agent/tasks/` with task 0000 (orientation) | a session you start by hand reads the repo and the briefing, writes `handoff.md` and commits it on `agent/0000-orientation`; the smoke test passes with the new mounts; the session shows the locked `CLAUDE.md` was loaded |
-| 3.2 | Claude | **Getting work out:** the sync key also reads `outbox/` (`agent/` folder, read-only); the WSL2 pull fetches it | task 0000's branch reaches GitHub as a PR from the bundle you attach (closed after review, since it's only notes) |
+| 3.2 | Claude | **Built** (PR #20). **Getting work out:** `/srv/scout/agent-outbox`, written only by the after-step; the sync key also reads it (`agent/` folder, read-only); the WSL2 pull fetches it | task 0000's branch reaches GitHub as a PR from the bundle you attach (closed after review, since it's only notes) |
 | 3.3 | Agent | **Workday adapter** (task 0001): Workday boards → `BoardPosting`, in enrichment next to Ashby, Greenhouse and Lever. Sessions started by hand until it's done | PR merged; on the box `scout enrich --dry-run --board workday:<tenant/site>` reads real boards, and the next timed run adds details to Workday postings |
 | 3.4 | Claude | **Timer and digest:** `scout-agent.timer` at 10:20; the digest's Agent section (§4) | the timer skips on a quiet day with zero tokens; the digest shows the last session |
 | 3.5 | Agent | **Second source and a repair drill:** one big career site from `boards.csv` (task 0002); then task 0003, a source's parser against a changed synthetic fixture, so its tests fail | both PRs merged; the drill fixed by a timer-started session without editing the tests |
@@ -192,7 +193,7 @@ PR from Claude that marks the task done.
    (aim for under $3).
 6. **Still safe:** the smoke test passes with the new mounts. Acceptance tests 6–11 are
    re-checked: the agent can't write `/src/main` or `/briefing`, can't reach secrets, and can't
-   get a symlink out through `outbox/`.
+   get a symlink out through the outbox.
 7. **Scouting unaffected:** sweeps, digests and backups keep their schedule throughout
    (acceptance test 5).
 

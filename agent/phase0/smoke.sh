@@ -77,6 +77,10 @@ fi
 mkdir -p "$SCOUT_HOME/logs/agent-briefing" && pass "briefing folder present" \
   || fail "briefing folder present" "mkdir -p $SCOUT_HOME/logs/agent-briefing"
 
+ob="$SCOUT_HOME/agent-outbox"
+[[ -d "$ob" && ! -L "$ob" && "$(stat -c %u "$ob")" == 10001 ]] && pass "agent-outbox owned by uid 10001" \
+  || fail "agent-outbox owned by uid 10001" "sudo install -d -o 10001 -g $(id -gn) -m 2775 $ob (box-setup §19)"
+
 ws="$SCOUT_HOME/workspace"
 [[ -d "$ws" && "$(stat -c %u "$ws")" == 10001 ]] && pass "workspace owned by uid 10001" \
   || fail "workspace owned by uid 10001" "sudo chown 10001 $ws"

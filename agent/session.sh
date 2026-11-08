@@ -8,10 +8,12 @@
 #   agent/session.sh --force         run even if there's nothing to do
 #   agent/session.sh --dry-run       gate and briefing only; no session
 #   agent/session.sh --check-rules   a 1-turn session: can the agent see its locked rules?
+#   agent/session.sh --pack          only the after-step: refresh agent-outbox (no LLM)
 #
 # Steps: lock -> gate -> briefing (logs/agent-briefing, mounted read-only at /briefing) ->
-# before-step in the container -> Claude Code session -> after-step in the container
-# (outbox/agent.bundle) -> logs/agent/last-session.json for the digest.
+# before-step in the container -> Claude Code session -> after-step in the container, the
+# only step that mounts /srv/scout/agent-outbox (agent.bundle, manifest, notes) ->
+# logs/agent/last-session.json for the digest.
 #
 # Environment: SCOUT_HOME (/srv/scout), SCOUT_AGENT_TURNS (60), SCOUT_AGENT_TIMEOUT (1800 s),
 # SCOUT_TASKS_DIR (agent/tasks next to this script).
@@ -26,6 +28,7 @@ TURNS=${SCOUT_AGENT_TURNS:-60}
 TIMEOUT=${SCOUT_AGENT_TIMEOUT:-1800}
 WRAP_UP=$((TURNS > 15 ? TURNS - 10 : TURNS))
 BRIEF=$SCOUT_HOME/logs/agent-briefing
+OUTBOX=$SCOUT_HOME/agent-outbox
 LOGS=$SCOUT_HOME/logs/agent
 RULES_VERSION=scout-rules-1
 COMPOSE=(docker compose -f "$REPO_DIR/compose.yaml")
@@ -37,6 +40,7 @@ case ${1:-} in
   --force) mode=force ;;
   --dry-run) mode=dry ;;
   --check-rules) mode=rules ;;
+  --pack) mode=pack ;;
   *) sed -n '2,18p' "$0"; exit 64 ;;
 esac
 
@@ -106,6 +110,25 @@ open_tasks() {
     [[ -f $f ]] && grep -qx 'status: open' "$f" && basename "$f" | cut -c1-4
   done
 }
+
+# The no-LLM steps run in the agent container. Only the after-step gets the outbox.
+agent_step() {
+  local mount=()
+  if [[ $1 == after ]]; then
+    if [[ ! -d $OUTBOX || -L $OUTBOX ]]; then
+      echo "session: $OUTBOX is missing; create it (box-setup §19 step 1)" >&2
+      return 1
+    fi
+    mount=(-v "$OUTBOX:/outbox")
+  fi
+  "${COMPOSE[@]}" --profile agent run --rm -T --name "scout-agent-step-$1-$STAMP-$$" "${mount[@]}" \
+    agent bash /src/main/agent/workspace-step.sh "$1"
+}
+
+if [[ $mode == pack ]]; then
+  agent_step after
+  exit
+fi
 
 # ---------------------------------------------------------------- rules check (1 turn)
 if [[ $mode == rules ]]; then
@@ -202,10 +225,6 @@ why: $why
 EOF
 
 # ---------------------------------------------------------------- before (no LLM)
-agent_step() {
-  "${COMPOSE[@]}" --profile agent run --rm -T --name "scout-agent-step-$1-$STAMP-$$" agent \
-    bash /src/main/agent/workspace-step.sh "$1"
-}
 if ! agent_step before; then
   record failed "before-step failed (see the output above)"
   exit 1

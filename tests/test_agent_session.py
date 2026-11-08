@@ -54,7 +54,14 @@ def main_repo(tmp_path):
 
 
 def step(ws, main, which):
-    env = {**os.environ, "SCOUT_WORKSPACE": str(ws), "SCOUT_SRC_MAIN": str(main)}
+    outbox = ws.parent / "agent-outbox"
+    outbox.mkdir(exist_ok=True)
+    env = {
+        **os.environ,
+        "SCOUT_WORKSPACE": str(ws),
+        "SCOUT_SRC_MAIN": str(main),
+        "SCOUT_OUTBOX": str(outbox),
+    }
     return subprocess.run(
         ["bash", str(STEP), which], env=env, capture_output=True, text=True, timeout=60, check=False
     )
@@ -128,7 +135,7 @@ def test_after_bundles_agent_branches_and_notes(tmp_path, main_repo):
 
     r = step(ws, main_repo, "after")
     assert r.returncode == 0, r.stderr
-    out = ws / "outbox"
+    out = tmp_path / "agent-outbox"
     assert (out / "notes" / "handoff.md").read_text() == "rules: scout-rules-1\n"
     manifest = (out / "manifest.txt").read_text()
     assert "branch=agent/0000-orientation" in manifest and "orientation notes" in manifest
@@ -150,6 +157,17 @@ def test_after_bundles_agent_branches_and_notes(tmp_path, main_repo):
 
 
 @needs_tools
+def test_after_needs_the_outbox_mount(tmp_path, main_repo):
+    ws = tmp_path / "ws"
+    step(ws, main_repo, "before")
+    env = {**os.environ, "SCOUT_WORKSPACE": str(ws), "SCOUT_SRC_MAIN": str(main_repo),
+           "SCOUT_OUTBOX": str(tmp_path / "missing")}  # fmt: skip
+    r = subprocess.run(["bash", str(STEP), "after"], env=env, capture_output=True, text=True,
+                       check=False)  # fmt: skip
+    assert r.returncode == 1 and "missing or not writable" in r.stderr
+
+
+@needs_tools
 def test_after_keeps_only_regular_note_files(tmp_path, main_repo):
     ws = tmp_path / "ws"
     step(ws, main_repo, "before")
@@ -158,15 +176,16 @@ def test_after_keeps_only_regular_note_files(tmp_path, main_repo):
     (ws / "notes" / "link.md").symlink_to(secret)
     (ws / "notes" / "big.md").write_text("x" * 300_000)
     (ws / "notes" / "ok.md").write_text("fine\n")
-    # An outbox the agent replaced with a link to somewhere else is replaced, not followed.
+    # Something left in the outbox (a link to somewhere else) is removed, not followed.
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     (elsewhere / "keep.txt").write_text("keep\n")
-    (ws / "outbox").symlink_to(elsewhere)
+    out = tmp_path / "agent-outbox"  # made by step()
+    (out / "notes").symlink_to(elsewhere)
+    (out / "old.txt").write_text("stale\n")
 
     assert step(ws, main_repo, "after").returncode == 0
-    out = ws / "outbox"
-    assert out.is_dir() and not out.is_symlink()
+    assert sorted(p.name for p in out.iterdir()) == ["manifest.txt", "notes"]
     assert sorted(p.name for p in (out / "notes").iterdir()) == ["ok.md"]
     assert (elsewhere / "keep.txt").read_text() == "keep\n"
     assert not (out / "agent.bundle").exists()  # no agent/* branches yet
@@ -183,6 +202,7 @@ def box(tmp_path):
     home = tmp_path / "srv-scout"
     (home / "logs" / "digests").mkdir(parents=True)
     (home / "logs" / "digests" / "latest.txt").write_text("Scout digest: 3 new jobs\n")
+    (home / "agent-outbox").mkdir()
     tasks = tmp_path / "tasks"
     tasks.mkdir()
     bin_ = tmp_path / "bin"
@@ -279,6 +299,10 @@ def test_open_task_runs_before_session_after_in_order(box):
     assert "claude -p" in agent[1] and "Task: 0001." in agent[1] and "--max-turns 60" in agent[1]
     assert "-w /workspace" in agent[1]
     assert "workspace-step.sh after" in agent[2]
+    # Only the after-step sees the outbox; the session never does.
+    outbox = f"-v {box['home'] / 'agent-outbox'}:/outbox"
+    assert outbox in agent[2]
+    assert outbox not in agent[0] and outbox not in agent[1]
     s = (box["home"] / "logs" / "agent-briefing" / "session.txt").read_text()
     assert "task: 0001" in s and "/src/main/agent/tasks/0001-workday.md" in s
     assert "wrap_up_by_turn: 50" in s
@@ -354,6 +378,24 @@ def test_a_second_session_waits_for_the_first(box):
         holder.kill()
     assert r.returncode == 0 and "another agent session is running" in r.stdout
     assert calls(box) == []
+
+
+@needs_tools
+def test_pack_runs_only_the_after_step(box):
+    r = session(box, "--pack")
+    assert r.returncode == 0, r.stderr
+    agent = [c for c in calls(box) if "--profile agent" in c]
+    assert len(agent) == 1 and "workspace-step.sh after" in agent[0]
+
+
+@needs_tools
+def test_missing_outbox_is_reported_not_created(box):
+    (box["home"] / "agent-outbox").rmdir()
+    add_task(box, "0001-workday")
+    r = session(box)
+    assert "agent-outbox is missing" in r.stderr
+    assert not any("workspace-step.sh after" in c for c in calls(box))
+    assert not (box["home"] / "agent-outbox").exists()
 
 
 @needs_tools
