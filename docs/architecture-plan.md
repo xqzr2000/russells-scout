@@ -203,7 +203,7 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1    # box talks only to DeepSeek and t
 - A host timer starts the agent container for a session, runs Claude Code headless with a task, and the container exits.
 - Every session has a **turn limit** and a **wall-clock timeout**. These are the only budget controls besides the prepaid balance.
 - When the balance is empty, sessions fail fast and the timer keeps trying on its normal schedule; scouting continues unaffected.
-- What a session does, how often sessions run, and how the agent picks its work: **next discussion** (the agent's routine).
+- What a session does, how often sessions run, and how the agent picks its work: decided in [phase3-plan.md](phase3-plan.md) §2–3.
 
 ### 5.3 Instructions
 
@@ -238,7 +238,7 @@ The principle: assume the agent will eventually do something wrong, by mistake o
 
 **6. Runtime separation.** The scouting runtime is a separate container. If the agent breaks, collection carries on with the last working scripts.
 
-How the agent's changes reach the scout runtime (tests that must pass, canary run, rollback) is an open item for the routine discussion; v2.2's gates (§12 of v2.2) are the starting point.
+How the agent's changes reach the scout runtime: through reviewed PRs, merged by you ([phase3-plan.md](phase3-plan.md) §2). Nothing the agent writes runs in the runtime before that.
 
 ---
 
@@ -527,7 +527,7 @@ removed; no LLM calls.
 
 ### Phase 3 — The agent takes over
 
-Agent sessions on the host timer; `CLAUDE.md`; the routine (to be designed); how agent changes reach the runtime. First real tasks: a Workday enrichment adapter (the largest single ATS group, about 21% of postings in the probe), then the largest custom career sites. Exit: the agent adds, tunes and repairs sources inside its rules and the monthly budget.
+**Planned (2026-11-07):** [phase3-plan.md](phase3-plan.md), covering the routine (one daily session at 10:20, only when there's work) and how changes go live (reviewed PRs from a git bundle). Agent sessions on the host timer; locked `CLAUDE.md`; the routine; how agent changes reach the runtime. First real tasks: a Workday enrichment adapter (the largest single ATS group, about 21% of postings in the probe), then the largest custom career sites. Exit: the agent adds, tunes and repairs sources inside its rules and the monthly budget.
 
 ### Phase 4 — Discovery and coverage
 
@@ -594,8 +594,8 @@ SSH: key-only login for `shaw2012`, LAN-only firewall, fixed address. A separate
 ## 17. Open Items and Next Discussions
 
 **Next discussions, in suggested order**
-1. **The agent's routine:** when sessions run, what each session does, how the agent picks its work, turn limits (Phase 0 suggests starting at 1–2 sessions a day).
-2. **How agent changes go live:** tests, canary, rollback between the agent's repo and the scout runtime.
+1. ~~**The agent's routine**~~ — decided 2026-11-07 ([phase3-plan.md](phase3-plan.md) §2–3).
+2. ~~**How agent changes go live**~~ — decided 2026-11-07: reviewed PRs ([phase3-plan.md](phase3-plan.md) §2).
 3. **Wider matching:** similar jobs the title list misses (Phase 4).
 4. **Scouting tools:** Firecrawl, Tavily (deferred); Crawl4AI for custom career pages.
 
@@ -648,6 +648,18 @@ SSH: key-only login for `shaw2012`, LAN-only firewall, fixed address. A separate
   digest (§10) is written to files in `/srv/scout/logs/digests` and read by hand (or from the
   WSL2 copy). The mailer and the immediate alerts (§10, §11) are dropped; problems go at the top
   of the digest. Push notifications (counts only) remain possible later.
+
+### Decisions log (2026-11-07) — Phase 2 closed, Phase 3 planned
+
+- Phase 2 done: a week unattended, all exit criteria met ([phase2-results.md](phase2-results.md)).
+- Agent changes go live only through reviewed PRs. The agent's branches leave the box as a git
+  bundle through the WSL2 sync; Russell attaches it in chat; Claude opens and reviews the PR;
+  Russell merges.
+- One agent session a day at 10:20, started only when there's an open task or a source needs
+  attention.
+- The agent's rules are locked in the managed-policy `CLAUDE.md`. Tasks are files in
+  `agent/tasks/` on `main`. No database connection for the agent in Phase 3; a read-only
+  briefing instead.
 
 ### First milestone
 
