@@ -57,12 +57,13 @@ else
 fi
 
 pol="$SCOUT_HOME/policy"
-if [[ -f "$pol/managed-settings.json" && -x "$pol/hooks/guard.sh" && -f "$pol/CLAUDE.md" ]]; then
+if [[ -f "$pol/managed-settings.json" && -x "$pol/hooks/guard.sh" && -x "$pol/hooks/turns.sh" && -f "$pol/CLAUDE.md" ]]; then
   pass "locked settings installed in $pol"
   [[ "$(stat -c %U "$pol/managed-settings.json")" == root ]] \
     && pass "locked settings owned by root" || fail "locked settings owned by root" "sudo chown -R root:root $pol"
   if diff -q "$pol/managed-settings.json" "$REPO_DIR/agent/managed-settings/managed-settings.json" >/dev/null \
      && diff -q "$pol/hooks/guard.sh" "$REPO_DIR/agent/managed-settings/hooks/guard.sh" >/dev/null \
+     && diff -q "$pol/hooks/turns.sh" "$REPO_DIR/agent/managed-settings/hooks/turns.sh" >/dev/null \
      && diff -q "$pol/CLAUDE.md" "$REPO_DIR/agent/managed-settings/CLAUDE.md" >/dev/null; then
     pass "installed rules match the repo copy"
   else

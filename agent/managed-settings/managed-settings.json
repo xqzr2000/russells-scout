@@ -49,6 +49,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/etc/claude-code/hooks/turns.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

@@ -30,7 +30,8 @@ WRAP_UP=$((TURNS > 15 ? TURNS - 10 : TURNS))
 BRIEF=$SCOUT_HOME/logs/agent-briefing
 OUTBOX=$SCOUT_HOME/agent-outbox
 LOGS=$SCOUT_HOME/logs/agent
-RULES_VERSION=scout-rules-1
+RULES_VERSION=scout-rules-2
+SOFT=$((TURNS * 2 / 3))
 COMPOSE=(docker compose -f "$REPO_DIR/compose.yaml")
 
 mode=gate task=""
@@ -214,6 +215,17 @@ if [[ $mode == gate && $status_ok == 0 && $task == repair ]]; then
 fi
 
 label=${task:-none}
+# How the previous session ended: a turn or time limit means its handoff may be stale.
+previous=$(python3 -I - "$LOGS/last-session.json" <<'PY' 2>/dev/null
+import json, sys
+try:
+    r = json.load(open(sys.argv[1]))
+except Exception:
+    print("none")
+else:
+    print(f"{r.get('outcome')} (task {r.get('task')}, {r.get('time')})")
+PY
+)
 cat <<EOF | brief_write session.txt
 task: $label
 task_file: $(compgen -G "$TASKS/$label-*.md" | sed "s|^$TASKS|/src/main/agent/tasks|" || true)
@@ -222,6 +234,7 @@ turn_limit: $TURNS
 wrap_up_by_turn: $WRAP_UP
 time_limit_minutes: $((TIMEOUT / 60))
 why: $why
+previous_session: ${previous:-none}
 EOF
 
 # ---------------------------------------------------------------- before (no LLM)
@@ -232,7 +245,9 @@ fi
 
 # ---------------------------------------------------------------- session
 prompt="Start a Scout agent session. Task: $label. Follow your Scout agent rules; /briefing/session.txt has the task and the limits."
+# The turn-budget hook (agent/managed-settings/hooks/turns.sh) reads SCOUT_TURN_BUDGET.
 SCOUT_WORKDIR=/workspace SCOUT_STREAM=1 SCOUT_SESSION_OUT="$LOGS/session-$STAMP" \
+  SCOUT_EXTRA_ENV="SCOUT_TURN_BUDGET=$TURNS:$SOFT:$WRAP_UP" \
   "$REPO_DIR/agent/run-session.sh" "$prompt" "$TURNS" "$TIMEOUT"
 rc=$?
 result="$LOGS/session-$STAMP.jsonl"
