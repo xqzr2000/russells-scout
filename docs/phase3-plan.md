@@ -69,8 +69,9 @@ Mine (say if you want any changed):
    That's enough to build and repair sources. It costs fewer tokens than querying, and the
    agent can't change data. The `scout_agent` role stays unused until something needs it.
 7. **The agent's workspace** (`/srv/scout/workspace`, uid 10001):
-   - `repo/`: a git repo with no remote. Each session starts with `git fetch /src/main main`, and
-     work goes on a branch named `agent/<task>`, so it's always based on the latest `main`.
+   - `repo/`: a clone of `main`, and nothing it can push to. Before each session a step with
+     no LLM refreshes `origin/main` from `/src/main`. Work goes on a branch named
+     `agent/<task>`, based on the latest `main`.
    - `notes/`:
      - `handoff.md`: where it stopped, the next step, and "Needs your attention";
      - `journal.md`: one line per session.
@@ -120,15 +121,22 @@ What `agent/session.sh` does on the host (as `shaw2012`, by timer or by hand):
    or `scout status` shows a source needing attention. Otherwise it records "skipped: nothing to
    do" and exits, with zero tokens. `--task <id>` runs one task by hand; `--force` skips the
    gate.
-3. **Briefing:** it writes `status.txt`, the latest digest and `boards.csv` into
-   `logs/agent-briefing/`.
-4. **Session:** `agent/run-session.sh` with a short fixed prompt ("start your session") plus the
+3. **Briefing:** it writes `status.txt`, the latest digest, `boards.csv` and `session.txt` (the
+   task and the limits) into `logs/agent-briefing/`.
+4. **Before:** a command in the hardened container, with no LLM (`agent/workspace-step.sh
+   before`), clones the agent's repo from `/src/main` the first time and refreshes
+   `origin/main` before every session after that.
+5. **Session:** `agent/run-session.sh` with a short fixed prompt ("start your session") plus the
    task id, and the limits from §2.12. The rules come from the locked `CLAUDE.md`.
-5. **After:** a second command in the same hardened container, with no LLM, refreshes
-   `outbox/agent.bundle` (`git bundle create … --branches`) and copies the notes into `outbox/`.
-   The host never runs git on the agent's repo: a repo the agent controls can carry settings
-   that run commands. It writes `logs/agent/last-session.json` from the session result (time,
-   task, turns, ok or why not). The digest reads it.
+6. **After:** another no-LLM command in the container (`workspace-step.sh after`) rebuilds
+   `outbox/`:
+   - `agent.bundle` with every `agent/*` branch;
+   - `manifest.txt` listing each branch and its head commit;
+   - copies of the notes.
+
+   The host never runs git on the agent's repo, because a repo the agent controls can carry
+   settings that run commands. The host then writes `logs/agent/last-session.json` from the
+   session result (time, task, turns, outcome), which the digest reads.
 
 What the agent does (from the locked `CLAUDE.md`):
 
@@ -137,7 +145,8 @@ What the agent does (from the locked `CLAUDE.md`):
    - a source needing attention (repair);
    - else its task;
    - else write "nothing to do" and stop.
-3. `git fetch /src/main main`, then continue its branch or start `agent/<task>` from `main`.
+3. Continue its branch, rebased onto `origin/main` if `main` moved on, or start `agent/<task>`
+   from `origin/main`.
 4. Work in small steps:
    - fetch a few samples into `scratch/` (1 request a second);
    - write the adapter, synthetic fixtures and tests;
@@ -160,7 +169,7 @@ A new **Agent** part of the health section:
 
 | Task | Who | What | Done when |
 |---|---|---|---|
-| 3.1 | Claude | **Workspace and rules:** locked `CLAUDE.md`; mounts (`/src/main`, `/briefing`); `agent/session.sh` (lock, gate, briefing, after-step); `agent/tasks/` with task 0000 (orientation) | a session you start by hand reads the repo and the briefing, writes `handoff.md` and commits it on `agent/0000-orientation`; the smoke test passes with the new mounts; the session shows the locked `CLAUDE.md` was loaded |
+| 3.1 | Claude | **Built** (PR #19). **Workspace and rules:** locked `CLAUDE.md`; mounts (`/src/main`, `/briefing`); `agent/session.sh` (lock, gate, briefing, after-step); `agent/tasks/` with task 0000 (orientation) | a session you start by hand reads the repo and the briefing, writes `handoff.md` and commits it on `agent/0000-orientation`; the smoke test passes with the new mounts; the session shows the locked `CLAUDE.md` was loaded |
 | 3.2 | Claude | **Getting work out:** the sync key also reads `outbox/` (`agent/` folder, read-only); the WSL2 pull fetches it | task 0000's branch reaches GitHub as a PR from the bundle you attach (closed after review, since it's only notes) |
 | 3.3 | Agent | **Workday adapter** (task 0001): Workday boards → `BoardPosting`, in enrichment next to Ashby, Greenhouse and Lever. Sessions started by hand until it's done | PR merged; on the box `scout enrich --dry-run --board workday:<tenant/site>` reads real boards, and the next timed run adds details to Workday postings |
 | 3.4 | Claude | **Timer and digest:** `scout-agent.timer` at 10:20; the digest's Agent section (§4) | the timer skips on a quiet day with zero tokens; the digest shows the last session |

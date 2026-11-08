@@ -6,6 +6,7 @@
     "defaultMode": "dontAsk",
     "disableBypassPermissionsMode": "disable",
     "disableAutoMode": "disable",
+    "additionalDirectories": ["/briefing", "/src/main"],
 
     "allow": [
       "Bash",

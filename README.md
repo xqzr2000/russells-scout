@@ -27,8 +27,10 @@ Crawl4AI stays for custom career pages later.
 |---|---|
 | `compose.yaml` | Services on the box: the agent, Postgres (`db`) and the scouting code (`scout`) |
 | `agent/Dockerfile` | Agent image: Node 22, Claude Code 2.1.310 (pinned), Python, git |
-| `agent/managed-settings/` | Locked permission rules and guard hook (installed read-only on the host) |
+| `agent/managed-settings/` | Locked permission rules, guard hook and the agent's rules (`CLAUDE.md`), installed read-only on the host |
 | `agent/run-session.sh` | Start one headless session with a turn limit and timeout |
+| `agent/session.sh`, `agent/workspace-step.sh` | The Phase 3 routine: gate, briefing, the session, and packing the agent's branches into `outbox/agent.bundle` |
+| `agent/tasks/` | The agent's work queue, one file per task |
 | `agent/phase0/` | Smoke tests, guard-rule tests, capability tests (`capability.py`, `tasks/`) |
 | `migrations/` | Numbered SQL files for the database, applied with `scout db migrate` |
 | `ops/db/` | Database setup: role creation on first start, password generator ([README](ops/db/README.md)) |
