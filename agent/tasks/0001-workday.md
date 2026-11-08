@@ -1,4 +1,4 @@
-status: open
+status: done
 branch: agent/0001-workday
 
 # 0001: Workday boards in enrichment

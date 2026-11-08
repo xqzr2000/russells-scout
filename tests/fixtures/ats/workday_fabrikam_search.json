@@ -1,0 +1,35 @@
+{
+  "total": 4,
+  "jobPostings": [
+    {
+      "title": "Data Scientist",
+      "externalPath": "/job/Vancouver-BC/Data-Scientist_R123",
+      "locationsText": "Vancouver, British Columbia, Canada",
+      "postedOn": "Posted 3 Days Ago",
+      "bulletFields": ["R123"]
+    },
+    {
+      "title": "Office Manager",
+      "externalPath": "/job/Vancouver-BC/Office-Manager_R124",
+      "locationsText": "Vancouver, British Columbia, Canada",
+      "postedOn": "Posted 5 Days Ago",
+      "bulletFields": ["R124"]
+    },
+    {
+      "title": "Remote Data Engineer",
+      "externalPath": "/job/Remote/Remote-Data-Engineer_R125",
+      "locationsText": "Remote, Canada",
+      "postedOn": "Posted 1 Day Ago",
+      "bulletFields": ["R125"]
+    },
+    {
+      "title": "Machine Learning Engineer",
+      "externalPath": "/job/Multi-Location/Machine-Learning-Engineer_R126",
+      "locationsText": "4 Locations",
+      "postedOn": "Posted 2 Days Ago",
+      "bulletFields": ["R126"]
+    }
+  ],
+  "facets": {},
+  "userAuthenticated": false
+}

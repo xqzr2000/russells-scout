@@ -1,0 +1,20 @@
+{
+  "jobPostingInfo": {
+    "id": "abc123",
+    "title": "Data Scientist",
+    "jobDescription": "<p>Build <b>models</b> for fun.</p><ul><li>Python</li><li>SQL</li></ul>",
+    "location": "Canada, BC, Vancouver",
+    "additionalLocations": null,
+    "remoteType": "Hybrid",
+    "postedOn": "Posted 3 Days Ago",
+    "startDate": "2026-10-01",
+    "timeType": "Full time",
+    "jobReqId": "R123",
+    "jobPostingId": "Data-Scientist_R123",
+    "country": {"descriptor": "Canada", "id": "synthetic"},
+    "externalUrl": "https://fabrikam.wd3.myworkdayjobs.com/Careers/job/Vancouver-BC/Data-Scientist_R123"
+  },
+  "hiringOrganization": {"name": "Fabrikam"},
+  "similarJobs": [],
+  "userAuthenticated": false
+}

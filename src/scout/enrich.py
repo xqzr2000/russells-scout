@@ -1,4 +1,4 @@
-"""Job-board enrichment: Ashby, Greenhouse, Lever (docs/phase1-plan.md §3 step 7, task 1.8).
+"""Job-board enrichment: Ashby, Greenhouse, Lever, Workday (docs/phase1-plan.md §3 step 7).
 
 `scout enrich` (and `scout sweep`, after saving) does, as scout_ingest:
 
@@ -6,7 +6,7 @@
 2. Greenhouse postings whose link carries only ?gh_jid=: a few board names made from the
    employer's name are tried, and the one where that exact job exists is kept (employer
    re-tried at most weekly).
-3. Every Ashby, Greenhouse and Lever board with an active posting is fetched (one request
+3. Every Ashby, Greenhouse, Lever and Workday board with an active posting is fetched (one request
    each, one second apart). Per board, in its own transaction (a failing board never
    affects the others):
      - WorkBC postings found on the board get its description, pay range, workplace and
@@ -144,16 +144,40 @@ def _discover_greenhouse(conn, stats: EnrichStats, *, dry_run, get, sleep, delay
                 )
 
 
-def _boards(conn, only: list[str] | None, extra: list[tuple[str, str]]) -> list[tuple[str, str]]:
+def _boards(
+    conn, only: list[str] | None, extra: list[tuple[str, str]]
+) -> list[tuple[str, str, str | None]]:
+    """(ats, board, host). Workday needs the host (the board name is only `tenant/site`):
+    a Workday host from one of the board's posting links, else the employer's careers
+    host if that is a Workday host. An employer's careers_host is the first link host seen
+    for it, which can be another job board, so the posting's own link comes first."""
     rows = conn.execute(
-        "SELECT DISTINCT ats, ats_board FROM postings WHERE status = 'active'"
-        " AND ats = ANY(%s) AND ats_board IS NOT NULL ORDER BY 1, 2",
-        (list(ats_api.SUPPORTED),),
+        """
+        SELECT p.ats, p.ats_board,
+               coalesce(
+                 min(substring(lower(p.jump_url) from '^https?://([^/:?#]+)'))
+                   FILTER (WHERE substring(lower(p.jump_url) from '^https?://([^/:?#]+)') ~ %s),
+                 min(lower(e.careers_host)) FILTER (WHERE lower(e.careers_host) ~ %s))
+        FROM postings p LEFT JOIN employers e ON e.id = p.employer_id
+        WHERE p.status = 'active' AND p.ats = ANY(%s) AND p.ats_board IS NOT NULL
+        GROUP BY p.ats, p.ats_board ORDER BY 1, 2
+        """,
+        (ats_api.WORKDAY_HOST_SQL, ats_api.WORKDAY_HOST_SQL, list(ats_api.SUPPORTED)),
     ).fetchall()
-    boards = list(dict.fromkeys([(a, b) for a, b in rows] + extra))
+    boards: list[tuple[str, str, str | None]] = []
+    seen: dict[tuple[str, str], int] = {}
+    for ats, board, host in rows:
+        seen[(ats, board)] = len(boards)
+        boards.append((ats, board, host))
+    for ats, board in extra:
+        if (ats, board) not in seen:
+            seen[(ats, board)] = len(boards)
+            boards.append((ats, board, None))
     if only:
         wanted = {tuple(o.split(":", 1)) for o in only}
-        boards = [b for b in boards if b in wanted] + [w for w in wanted if w not in boards]
+        selected = [b for b in boards if (b[0], b[1]) in wanted]
+        selected += [(ats, board, None) for ats, board in wanted if (ats, board) not in seen]
+        boards = selected
     return boards
 
 
@@ -335,6 +359,7 @@ def enrich(
     dry_run: bool = False,
     only: list[str] | None = None,
     get: ats_api.Get = ats_api.http_get,
+    post: ats_api.Post = ats_api.http_post,
     sleep=time.sleep,
     delay: float = 1.0,
 ) -> EnrichStats:
@@ -351,10 +376,26 @@ def enrich(
             "INSERT INTO scout_runs (kind) VALUES ('enrich') RETURNING id"
         ).fetchone()[0]
 
-    for n, (ats, board) in enumerate(boards):
+    for n, (ats, board, host) in enumerate(boards):
         if n or stats.discovered or stats.not_found:
             sleep(delay)
-        res = ats_api.fetch_board(ats, board, get=get, sleep=sleep)
+        keep_ids: set[str] = set()
+        if ats == "workday":
+            # WorkBC postings found on this board must get their details, even when the
+            # board's own location text would not pass the board-only area filter.
+            keep_ids = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT ats_posting_id FROM postings WHERE found_via = 'workbc'"
+                    " AND ats = 'workday' AND lower(ats_board) = lower(%s)"
+                    " AND status = 'active' AND ats_posting_id IS NOT NULL",
+                    (board,),
+                )
+            }
+        res = ats_api.fetch_board(
+            ats, board, get=get, post=post, sleep=sleep, host=host,
+            terms=cfg.terms, metro=cfg.area.metro, keep_ids=keep_ids,
+        )  # fmt: skip
         bs = BoardStats(ats, board, res.outcome, res.error, on_board=len(res.postings))
         if dry_run:
             _apply_board(conn, res, cfg, None, bs, dry_run=True)
