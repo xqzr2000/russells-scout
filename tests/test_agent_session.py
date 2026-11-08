@@ -221,7 +221,7 @@ def box(tmp_path):
         '  *" claude -p "*)\n'
         '    if [[ "$*" == *"rules version"* ]]; then\n'
         '      echo \'{"type":"result","subtype":"success","is_error":false,"num_turns":1,'
-        '"result":"\'"${FAKE_RULES:-scout-rules-1}"\'"}\'\n'
+        '"result":"\'"${FAKE_RULES:-scout-rules-2}"\'"}\'\n'
         "    else\n"
         '      echo \'{"type":"system"}\'\n'
         '      echo \'{"type":"result","subtype":"\'"${FAKE_SUBTYPE:-success}"\'","is_error":false,'
@@ -404,3 +404,46 @@ def test_check_rules(box):
     assert r.returncode == 0 and "rules: PASS" in r.stdout
     r = session(box, "--check-rules", FAKE_RULES="I don't know")
     assert r.returncode == 1 and "rules: FAIL" in r.stdout
+
+
+# ---------------------------------------------------------------- hooks/turns.sh
+
+TURNS = AGENT / "managed-settings" / "hooks" / "turns.sh"
+
+
+def turn(tmp_path, budget="10:6:8"):
+    env = {**os.environ, "SCOUT_TURN_FILE": str(tmp_path / "count")}
+    if budget is None:
+        env.pop("SCOUT_TURN_BUDGET", None)
+    else:
+        env["SCOUT_TURN_BUDGET"] = budget
+    return subprocess.run(["bash", str(TURNS)], env=env, input='{"tool_name":"Bash"}',
+                          capture_output=True, text=True, check=False)  # fmt: skip
+
+
+def test_turn_budget_reminds_once_then_says_stop(tmp_path):
+    results = [turn(tmp_path) for _ in range(10)]
+    codes = [r.returncode for r in results]
+    assert codes == [0, 0, 0, 0, 0, 2, 0, 2, 2, 2]
+    assert "about 6 of 10 turns used. Finish the step" in results[5].stderr
+    assert "about 8 of 10 turns used. STOP NOW" in results[7].stderr
+    assert "handoff.md" in results[9].stderr
+
+
+def test_turn_budget_does_nothing_without_a_budget(tmp_path):
+    for budget in (None, "", "junk", "60:40"):
+        for _ in range(60):
+            r = turn(tmp_path, budget)
+            assert r.returncode == 0 and r.stderr == ""
+    assert not (tmp_path / "count").exists()
+
+
+@needs_tools
+def test_session_passes_the_turn_budget_and_previous_outcome(box):
+    add_task(box, "0001-workday")
+    session(box, FAKE_SUBTYPE="error_max_turns", FAKE_CLAUDE_RC="1")
+    session(box)
+    agent = [c for c in calls(box) if " claude -p " in c]
+    assert all("-e SCOUT_TURN_BUDGET=60:40:50" in c for c in agent)
+    s = (box["home"] / "logs" / "agent-briefing" / "session.txt").read_text()
+    assert "previous_session: turn_limit (task 0001," in s

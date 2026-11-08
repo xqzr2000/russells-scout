@@ -106,8 +106,13 @@ Mine (say if you want any changed):
     and left for Phase 4.
 12. **Limits:**
     - Each session gets **60 turns and 30 minutes**. Phase 0's repair runs used at most 13 turns,
-      but real work reads more of the repo. The instructions tell the agent to wrap up (commit,
-      write the handoff) by turn 50.
+      but real work reads more of the repo.
+    - The agent can't see its turn count, so a locked `PostToolUse` hook
+      (`agent/managed-settings/hooks/turns.sh`) counts tool calls. It reminds the agent once at
+      40, and from 50 says "stop now: commit, handoff, journal" after every call. This was added
+      after the first Workday session (2026-11-07) used all 60 turns exploring and never wrote
+      its handoff. The rules (`scout-rules-2`) also ask for a handoff within the first 10 turns,
+      updated as the session goes.
     - Revisit after the Workday sessions.
     - One session at a time (a lock in `session.sh`).
     - The prepaid balance is the hard stop. If it runs out, sessions fail fast and scouting

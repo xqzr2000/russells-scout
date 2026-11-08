@@ -126,7 +126,7 @@ and mounted read-only. Re-run this whenever `agent/managed-settings/` changes
 ```bash
 cd /srv/scout/code
 sudo install -o root -g root -m 644 agent/managed-settings/managed-settings.json /srv/scout/policy/
-sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh /srv/scout/policy/hooks/
+sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh agent/managed-settings/hooks/turns.sh /srv/scout/policy/hooks/
 ```
 
 What they do:
@@ -135,6 +135,8 @@ What they do:
   `allowManagedHooksOnly`); no bypass or auto mode; headless sessions get an allow list
   (shell, files, web fetch) and a deny list (sudo, docker, ssh, git push/remote, secrets,
   subagents, web search). Anything not allowed is refused without asking (`dontAsk`).
+- `hooks/turns.sh` — runs after every tool call in a Phase 3 session and tells the agent when
+  it's near its turn limit (it can't see its own turn count).
 - `hooks/guard.sh` — runs before every tool call and blocks piping into a shell,
   privilege/container control, ssh/scp/mail, git remotes and pushes, installs from
   outside PyPI/npm, reading secrets or dumping the environment, and contacting your
@@ -666,7 +668,7 @@ files.
 cd /srv/scout/code
 git pull --ff-only
 sudo install -o root -g root -m 644 agent/managed-settings/managed-settings.json agent/managed-settings/CLAUDE.md /srv/scout/policy/
-sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh /srv/scout/policy/hooks/
+sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh agent/managed-settings/hooks/turns.sh /srv/scout/policy/hooks/
 mkdir -p /srv/scout/logs/agent-briefing /srv/scout/logs/agent
 sudo install -d -o 10001 -g "$(id -gn)" -m 2775 /srv/scout/agent-outbox
 ```
@@ -685,7 +687,7 @@ head -n 5 /srv/scout/logs/agent-briefing/boards.csv
 ```
 
 `--check-rules` asks the agent which rules version it has. It can only answer
-`scout-rules-1` if Claude Code loaded the locked `CLAUDE.md`. `--dry-run` should print
+`scout-rules-2` if Claude Code loaded the locked `CLAUDE.md`. `--dry-run` should print
 `open task 0000`.
 
 **3. Run a task by hand.** A session can take up to 30 minutes, and it stops if your ssh
@@ -741,7 +743,7 @@ cd /srv/scout/code
 git status --short                # should print nothing; the box copy is never edited
 git pull --ff-only
 sudo install -o root -g root -m 644 agent/managed-settings/managed-settings.json agent/managed-settings/CLAUDE.md /srv/scout/policy/
-sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh /srv/scout/policy/hooks/
+sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh agent/managed-settings/hooks/turns.sh /srv/scout/policy/hooks/
 docker compose --profile agent build agent
 agent/phase0/smoke.sh --offline
 # Phase 1 on: rebuild the scout image and apply any new migrations.
