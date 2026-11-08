@@ -1,0 +1,20 @@
+{
+  "jobPostingInfo": {
+    "id": "abc126",
+    "title": "Machine Learning Engineer",
+    "jobDescription": "<p>Train models with the team.</p>",
+    "location": "USA, CA, Pleasanton",
+    "additionalLocations": ["USA, GA, Atlanta", "Canada, BC, Vancouver"],
+    "remoteType": null,
+    "postedOn": "Posted 2 Days Ago",
+    "startDate": "2026-10-03",
+    "timeType": "Full time",
+    "jobReqId": "R126",
+    "jobPostingId": "Machine-Learning-Engineer_R126",
+    "country": {"descriptor": "United States of America", "id": "synthetic"},
+    "externalUrl": "https://fabrikam.wd3.myworkdayjobs.com/Careers/job/Multi-Location/Machine-Learning-Engineer_R126"
+  },
+  "hiringOrganization": {"name": "Fabrikam"},
+  "similarJobs": [],
+  "userAuthenticated": false
+}

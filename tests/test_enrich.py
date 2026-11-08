@@ -265,6 +265,31 @@ def test_dry_run_writes_nothing(conn):
 
 
 @needs_db
+def test_enrichment_passes_workday_host(conn, monkeypatch):
+    """The board is tenant/site; the host comes from the WorkBC posting's link."""
+    jobs = WORKBC + [
+        wjob(5, "Data Scientist", "Fabrikam",
+             "https://fabrikam.wd3.myworkdayjobs.com/Careers/job/Vancouver-BC/Data-Scientist_R123")
+    ]  # fmt: skip
+    sweep_save(conn, jobs)
+    calls = []
+
+    def fake_fetch_board(ats_name, board, **kw):
+        calls.append((ats_name, board, kw))
+        return ats.BoardResult(ats_name, board)
+
+    monkeypatch.setattr(ats, "fetch_board", fake_fetch_board)
+    run(conn)
+    workday = [c for c in calls if c[0] == "workday"]
+    assert len(workday) == 1
+    _, board, kw = workday[0]
+    assert board == "fabrikam/Careers"
+    assert kw["host"] == "fabrikam.wd3.myworkdayjobs.com"
+    assert kw["keep_ids"] == {"R123"}
+    assert kw["terms"] == CFG.terms and kw["metro"] == CFG.area.metro
+
+
+@needs_db
 def test_only_one_board(conn):
     sweep_save(conn)
     s = run(conn, only=["lever:fabrikam"])

@@ -1,0 +1,20 @@
+{
+  "jobPostingInfo": {
+    "id": "abc125",
+    "title": "Remote Data Engineer",
+    "jobDescription": "<p>Build pipelines from anywhere.</p>",
+    "location": "Remote, Canada",
+    "additionalLocations": null,
+    "remoteType": "Remote",
+    "postedOn": "Posted 1 Day Ago",
+    "startDate": "2026-10-05",
+    "timeType": "Full time",
+    "jobReqId": "R125",
+    "jobPostingId": "Remote-Data-Engineer_R125",
+    "country": {"descriptor": "Canada", "id": "synthetic"},
+    "externalUrl": "https://fabrikam.wd3.myworkdayjobs.com/Careers/job/Remote/Remote-Data-Engineer_R125"
+  },
+  "hiringOrganization": {"name": "Fabrikam"},
+  "similarJobs": [],
+  "userAuthenticated": false
+}

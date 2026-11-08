@@ -13,8 +13,9 @@
                       saving, the job boards are read too (--no-enrich to skip).
   scout status        What's in the database: counts, recent runs, problems, newest jobs.
   scout enrich [--dry-run] [--board ATS:BOARD ...]
-                      Read the Ashby, Greenhouse and Lever boards of saved postings:
-                      details for those postings, plus matching jobs only on the boards.
+                      Read the Ashby, Greenhouse, Lever and Workday boards of saved
+                      postings: details for those postings, plus matching jobs only on
+                      the boards.
 
 Add --show-browser to either command to run Chromium with a visible window
 (only works where there's a display, i.e. not in Codespaces).
@@ -121,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="print it; write and record nothing"
     )
 
-    p_enrich = sub.add_parser("enrich", help="read Ashby, Greenhouse and Lever boards")
+    p_enrich = sub.add_parser("enrich", help="read Ashby, Greenhouse, Lever and Workday boards")
     p_enrich.add_argument("--dry-run", action="store_true", help="report only; write nothing")
     p_enrich.add_argument(
         "--board",
