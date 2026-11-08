@@ -147,18 +147,22 @@ def _discover_greenhouse(conn, stats: EnrichStats, *, dry_run, get, sleep, delay
 def _boards(
     conn, only: list[str] | None, extra: list[tuple[str, str]]
 ) -> list[tuple[str, str, str | None]]:
-    """(ats, board, host). Workday needs the host from a posting's link or its employer:
-    the board name is only `tenant/site`."""
+    """(ats, board, host). Workday needs the host (the board name is only `tenant/site`):
+    a Workday host from one of the board's posting links, else the employer's careers
+    host if that is a Workday host. An employer's careers_host is the first link host seen
+    for it, which can be another job board, so the posting's own link comes first."""
     rows = conn.execute(
         """
         SELECT p.ats, p.ats_board,
-               min(coalesce(nullif(e.careers_host, ''),
-                            substring(p.jump_url from '^https?://([^/]+)')))
+               coalesce(
+                 min(substring(lower(p.jump_url) from '^https?://([^/:?#]+)'))
+                   FILTER (WHERE substring(lower(p.jump_url) from '^https?://([^/:?#]+)') ~ %s),
+                 min(lower(e.careers_host)) FILTER (WHERE lower(e.careers_host) ~ %s))
         FROM postings p LEFT JOIN employers e ON e.id = p.employer_id
         WHERE p.status = 'active' AND p.ats = ANY(%s) AND p.ats_board IS NOT NULL
         GROUP BY p.ats, p.ats_board ORDER BY 1, 2
         """,
-        (list(ats_api.SUPPORTED),),
+        (ats_api.WORKDAY_HOST_SQL, ats_api.WORKDAY_HOST_SQL, list(ats_api.SUPPORTED)),
     ).fetchall()
     boards: list[tuple[str, str, str | None]] = []
     seen: dict[tuple[str, str], int] = {}

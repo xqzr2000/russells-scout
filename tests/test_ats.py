@@ -289,6 +289,22 @@ def test_workday_needs_a_host_and_terms():
     assert res.outcome == "structural" and "terms" in res.error
 
 
+@pytest.mark.parametrize(
+    "host",
+    ["jobs.lever.co", "10.0.0.181", "localhost", "fabrikam.wd3.myworkdayjobs.com.evil.example",
+     "evil.example/fabrikam.wd3.myworkdayjobs.com", "FABRIKAM.wd3.myworkdayjobs.com:8080"],
+)  # fmt: skip
+def test_workday_only_talks_to_workday_hosts(host):
+    # The host comes from data (a posting link or an employer's careers host).
+    post, get = FakePost(WD_SEARCH, WD_JOB_URLS), wd_get()
+    res = ats.fetch_board(
+        "workday", WD_BOARD, host=host, terms=("data scientist",), get=get, post=post,
+        sleep=lambda s: None,
+    )  # fmt: skip
+    assert res.outcome == "structural" and "not a Workday host" in res.error
+    assert post.bodies == [] and get.urls == []
+
+
 def test_workday_keep_only_fetches_plausible_remote():
     def bp(title, location):
         return ats.BoardPosting("workday", WD_BOARD, "R1", title, "https://x", location=location)

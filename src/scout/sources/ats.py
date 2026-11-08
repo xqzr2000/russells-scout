@@ -54,6 +54,9 @@ GREENHOUSE = "https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=tr
 GREENHOUSE_JOB = "https://boards-api.greenhouse.io/v1/boards/{board}/jobs/{job_id}"
 LEVER = "https://api.lever.co/v0/postings/{board}?mode=json"
 LEVER_EU = "https://api.eu.lever.co/v0/postings/{board}?mode=json"
+# Only real Workday career-site hosts are ever contacted: the host comes from data.
+WORKDAY_HOST = re.compile(r"[a-z0-9-]+\.wd[0-9]+\.myworkdayjobs\.com")
+WORKDAY_HOST_SQL = r"^[a-z0-9-]+\.wd[0-9]+\.myworkdayjobs\.com$"
 WORKDAY = "https://{host}/wday/cxs/{tenant}/{site}/jobs"
 WORKDAY_JOB = "https://{host}/wday/cxs/{tenant}/{site}{path}"
 SUPPORTED = ("ashby", "greenhouse", "lever", "workday")
@@ -464,6 +467,9 @@ def _fetch_workday(
     tenant, slash, site = board.partition("/")
     if not host or not slash or not tenant or not site:
         res.outcome, res.error = "structural", "workday board needs tenant/site and a host"
+        return res
+    if not WORKDAY_HOST.fullmatch(host):
+        res.outcome, res.error = "structural", f"not a Workday host: {host!r}"
         return res
     terms = tuple(terms)
     if not terms:

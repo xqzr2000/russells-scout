@@ -290,6 +290,20 @@ def test_enrichment_passes_workday_host(conn, monkeypatch):
 
 
 @needs_db
+def test_workday_host_ignores_a_non_workday_careers_host(conn):
+    # Contoso's first link (so its careers_host) is a Lever page; its Workday posting's own
+    # link must decide the Workday host.
+    jobs = [
+        wjob(7, "Data Analyst", "Contoso", "https://jobs.lever.co/contoso/abc-123"),
+        wjob(8, "Data Scientist", "Contoso",
+             "https://contoso.wd5.myworkdayjobs.com/en-US/External/job/Burnaby/DS_R9"),
+    ]  # fmt: skip
+    sweep_save(conn, jobs)
+    hosts = {(a, b): h for a, b, h in enrich._boards(conn, None, [])}
+    assert hosts[("workday", "contoso/External")] == "contoso.wd5.myworkdayjobs.com"
+
+
+@needs_db
 def test_only_one_board(conn):
     sweep_save(conn)
     s = run(conn, only=["lever:fabrikam"])
