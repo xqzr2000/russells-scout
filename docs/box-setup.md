@@ -5,6 +5,9 @@ Design background: [architecture-plan.md](architecture-plan.md) §5, §7 and §1
 
 Commands marked **WSL2** run in your WSL2 terminal on Windows.
 Commands marked **box** run on the Ubuntu box (over `ssh scoutbox`, user `shaw2012`).
+This guide calls the box's ssh alias `scoutbox`. If yours has another name (for example
+`ubuntu-box`), use your name wherever a command says `scoutbox`. The sync key's alias,
+`scoutbox-sync`, is set up in step 18 and keeps its name.
 
 ## What you end up with
 
@@ -34,7 +37,8 @@ you (GitHub web UI or your own machine). The agent's own local git repo comes la
 
 ## 0. SSH shortcut (WSL2, once)
 
-If you don't have one already, add this to `~/.ssh/config` in WSL2 (use your box's address and key):
+If you don't have one already, add this to `~/.ssh/config` in WSL2 (use your box's address and key).
+If you already have an alias for the box, keep it and use it instead of `scoutbox` below:
 
 ```
 Host scoutbox
@@ -283,9 +287,16 @@ docker compose --profile scout run --rm scout db check  # expect "49 passed, 0 f
 
 The agent container is on a different Docker network and can't reach the database.
 
-To look at the data from Windows later: `ssh -L 5432:localhost:5432 scoutbox` in WSL2, then
-connect DBeaver or pgAdmin to `localhost:5432`, database `scout`, user `scout_reader`, with the
-password from `/srv/scout/secrets/db-roles.env`.
+To look at the data from Windows later (DBeaver or pgAdmin):
+
+1. **WSL2:** `ssh -N -L 5432:localhost:5432 scoutbox`. It prints nothing and keeps running;
+   that means the tunnel is open. Leave the window open and press Ctrl+C when you're done. If
+   port 5432 is taken on your PC, use `-L 15432:localhost:5432` and port 15432 below.
+2. **The password** (no `sudo` needed, since `secrets/` belongs to `shaw2012`):
+   `ssh scoutbox "grep SCOUT_READER_PASSWORD /srv/scout/secrets/db-roles.env"`. Use the part
+   after the `=`.
+3. **Connect** to host `localhost`, port `5432`, database `scout`, user `scout_reader`. The
+   tables and views are in schema **`scout`**, not `public`.
 
 ## 13. First WorkBC sweep, dry run (Phase 1, box)
 
@@ -603,7 +614,10 @@ rsync -r scoutbox-sync:secrets/ /tmp/nope
 ```
 
 **5. Windows: schedule it.** Open **PowerShell as administrator** (Start menu, type
-"PowerShell", right-click, *Run as administrator*) and paste:
+"PowerShell", right-click, *Run as administrator*) and paste these lines **one at a time**,
+pressing Enter after each. If you paste the whole block at once, PowerShell can run the lines
+out of order: `Start-ScheduledTask` first, then `Register-ScheduledTask` with an empty
+`$action`.
 
 ```powershell
 $action   = New-ScheduledTaskAction -Execute "wsl.exe" -Argument '-e bash -lc "~/scout-mirror/pull-from-box.sh"'
