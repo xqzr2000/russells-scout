@@ -57,19 +57,25 @@ else
 fi
 
 pol="$SCOUT_HOME/policy"
-if [[ -f "$pol/managed-settings.json" && -x "$pol/hooks/guard.sh" ]]; then
+if [[ -f "$pol/managed-settings.json" && -x "$pol/hooks/guard.sh" && -f "$pol/CLAUDE.md" ]]; then
   pass "locked settings installed in $pol"
   [[ "$(stat -c %U "$pol/managed-settings.json")" == root ]] \
     && pass "locked settings owned by root" || fail "locked settings owned by root" "sudo chown -R root:root $pol"
   if diff -q "$pol/managed-settings.json" "$REPO_DIR/agent/managed-settings/managed-settings.json" >/dev/null \
-     && diff -q "$pol/hooks/guard.sh" "$REPO_DIR/agent/managed-settings/hooks/guard.sh" >/dev/null; then
+     && diff -q "$pol/hooks/guard.sh" "$REPO_DIR/agent/managed-settings/hooks/guard.sh" >/dev/null \
+     && diff -q "$pol/CLAUDE.md" "$REPO_DIR/agent/managed-settings/CLAUDE.md" >/dev/null; then
     pass "installed rules match the repo copy"
   else
     fail "installed rules match the repo copy" "re-run the install step in docs/box-setup.md"
   fi
 else
-  fail "locked settings installed in $pol" "see docs/box-setup.md step 5"
+  fail "locked settings installed in $pol" "see docs/box-setup.md step 5 (and §19 for CLAUDE.md)"
 fi
+
+# Phase 3 mounts: the briefing folder must exist before a container starts, or Docker
+# creates it as root.
+mkdir -p "$SCOUT_HOME/logs/agent-briefing" && pass "briefing folder present" \
+  || fail "briefing folder present" "mkdir -p $SCOUT_HOME/logs/agent-briefing"
 
 ws="$SCOUT_HOME/workspace"
 [[ -d "$ws" && "$(stat -c %u "$ws")" == 10001 ]] && pass "workspace owned by uid 10001" \
@@ -95,6 +101,10 @@ echo "nnp=$(awk '/^NoNewPrivs/ {print $2}' /proc/self/status)"
 command -v sudo >/dev/null && echo "sudo=present" || echo "sudo=absent"
 rm -rf /workspace/smoke /workspace/.scout-logs/guard.log && mkdir -p /workspace/smoke && echo "workspace=writable" || echo "workspace=readonly"
 [ -r /etc/claude-code/managed-settings.json ] && echo "policy_readable=yes" || echo "policy_readable=no"
+[ -r /etc/claude-code/CLAUDE.md ] && echo "rules_readable=yes" || echo "rules_readable=no"
+[ -r /src/main/agent/session.sh ] && echo "main_readable=yes" || echo "main_readable=no"
+touch /src/main/x 2>/dev/null && echo "main=writable" || echo "main=readonly"
+touch /briefing/x 2>/dev/null && echo "briefing=writable" || echo "briefing=readonly"
 echo "anthropic=$(getent ahosts api.anthropic.com | awk '{print $1}' | sort -u | tr '\n' ' ')"
 echo "claude=$(claude --version 2>/dev/null | head -1)"
 SH
@@ -104,6 +114,10 @@ val() { sed -n "s/^$1=//p" <<<"$out"; }
 [[ "$(val rootfs)" == readonly ]]      && pass "root filesystem read-only"    || fail "root filesystem read-only"
 [[ "$(val policy)" == readonly ]]      && pass "locked rules read-only"       || fail "locked rules read-only"
 [[ "$(val policy_readable)" == yes ]]  && pass "locked rules readable"        || fail "locked rules readable"
+[[ "$(val rules_readable)" == yes ]]   && pass "agent CLAUDE.md readable"     || fail "agent CLAUDE.md readable"
+[[ "$(val main_readable)" == yes ]]    && pass "main readable at /src/main"   || fail "main readable at /src/main"
+[[ "$(val main)" == readonly ]]        && pass "/src/main read-only"          || fail "/src/main read-only"
+[[ "$(val briefing)" == readonly ]]    && pass "/briefing read-only"          || fail "/briefing read-only"
 [[ "$(val docker_sock)" == absent ]]   && pass "no Docker socket"             || fail "no Docker socket"
 [[ "$(val capeff)" =~ ^0+$ ]]          && pass "no capabilities"              || fail "no capabilities" "CapEff=$(val capeff)"
 [[ "$(val nnp)" == 1 ]]                && pass "no-new-privileges set"        || fail "no-new-privileges set"

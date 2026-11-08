@@ -19,7 +19,7 @@
 #   ${SCOUT_HOME}/logs/digests/          daily digest files (digest writes, uid 10002)
 #
 # The agent is on the default network and can't reach the database: db and scout
-# share a separate "data" network. The agent gets database access only in Phase 3.
+# share a separate "data" network. In Phase 3 it reads a briefing instead (no database).
 #
 # The agent never starts on `docker compose up`; sessions are started by
 # agent/run-session.sh with `docker compose run`.
@@ -46,10 +46,16 @@ services:
       - /home/agent:size=256m,uid=10001,gid=10001,mode=0700
     mem_limit: 3g
     pids_limit: 512
-    # No Docker socket, no host folders except these two:
+    # No Docker socket, no host folders except these (Phase 3: docs/phase3-plan.md §2):
+    #   workspace        the agent's repo, notes, scratch and outbox (its only writable folder)
+    #   policy           locked rules: managed settings, guard hook, CLAUDE.md
+    #   code             the box's copy of main (public repo), read-only: tasks and fresh main
+    #   agent-briefing   status, digest and boards list written by agent/session.sh
     volumes:
       - ${SCOUT_HOME:-/srv/scout}/workspace:/workspace
       - ${SCOUT_HOME:-/srv/scout}/policy:/etc/claude-code:ro
+      - ${SCOUT_HOME:-/srv/scout}/code:/src/main:ro
+      - ${SCOUT_HOME:-/srv/scout}/logs/agent-briefing:/briefing:ro
     # Claude Code never needs Anthropic here; make sure it can't reach it.
     # Both IPv4 and IPv6, or lookups fall through to a real IPv6 address.
     extra_hosts:

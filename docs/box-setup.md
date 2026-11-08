@@ -175,7 +175,7 @@ agent/phase0/smoke.sh
 | 6. Live hook | the agent tries `echo … \| sh` and the hook blocks it |
 | 7. Invalid key | a fake key fails fast instead of hanging (stands in for an empty balance) |
 
-Expected: 26/26. A report is saved to `/srv/scout/logs/smoke-<time>.txt`; each session's JSON
+Expected: 32/32 (26 passed and 5 skipped with `--offline`). A report is saved to `/srv/scout/logs/smoke-<time>.txt`; each session's JSON
 result and stderr are in `/srv/scout/logs/session-*.json` / `.err`.
 
 Test 6 can come back "inconclusive" if the model declines to run the command at all.
@@ -642,6 +642,73 @@ clickable links. Or in File Explorer: `\\wsl.localhost\<distro>\home\<you>\scout
 To stop: `Unregister-ScheduledTask -TaskName "Scout sync"` in PowerShell (as administrator), and
 on the box `/srv/scout/code/ops/sync/add-sync-key.sh --remove`.
 
+## 19. Agent sessions (Phase 3, box)
+
+The agent now works on real tasks ([phase3-plan.md](phase3-plan.md)). `agent/session.sh` runs one
+session:
+1. It writes a briefing (`scout status`, the latest digest, a list of job boards) into
+   `/srv/scout/logs/agent-briefing/`.
+2. It refreshes the agent's repo from `/srv/scout/code`.
+3. It runs Claude Code with 60 turns and 30 minutes.
+4. It packs the agent's branches into `/srv/scout/workspace/outbox/agent.bundle`.
+
+The agent sees `/srv/scout/code` (read-only) as `/src/main` and the briefing (read-only) as
+`/briefing`. Its rules are `agent/managed-settings/CLAUDE.md`, installed with the other locked
+files.
+
+**1. Install the new locked files and folders** (once, and again whenever
+`agent/managed-settings/` changes). `sudo` asks for your login password:
+
+```bash
+cd /srv/scout/code
+git pull --ff-only
+sudo install -o root -g root -m 644 agent/managed-settings/managed-settings.json agent/managed-settings/CLAUDE.md /srv/scout/policy/
+sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh /srv/scout/policy/hooks/
+mkdir -p /srv/scout/logs/agent-briefing /srv/scout/logs/agent
+```
+
+Create the folders before any agent container starts. Otherwise Docker creates
+`agent-briefing` as root, and `session.sh` can't write to it. The agent image doesn't need a
+rebuild.
+
+**2. Check the setup:**
+
+```bash
+agent/phase0/smoke.sh --offline     # expect 26 passed, 0 failed, 5 skipped
+agent/session.sh --check-rules      # 1 turn, well under a cent; expect "rules: PASS"
+agent/session.sh --dry-run          # gate and briefing only, no session
+head -n 5 /srv/scout/logs/agent-briefing/boards.csv
+```
+
+`--check-rules` asks the agent which rules version it has. It can only answer
+`scout-rules-1` if Claude Code loaded the locked `CLAUDE.md`. `--dry-run` should print
+`open task 0000`.
+
+**3. Run a task by hand.** A session can take up to 30 minutes, and it stops if your ssh
+connection drops. For anything long, start `tmux` first, then reattach after a dropped
+connection with `tmux attach`.
+
+```bash
+agent/session.sh --task 0000
+```
+
+It prints `workspace: …` lines (the before-step), `session: exit … turns=…` (the session), and
+`workspace: outbox has N branch(es)` (the after-step). Then look at what the agent left:
+
+```bash
+cat /srv/scout/workspace/notes/handoff.md
+tail -n 3 /srv/scout/workspace/notes/journal.md
+cat /srv/scout/workspace/outbox/manifest.txt
+cat /srv/scout/logs/agent/last-session.json
+```
+
+The full transcript is `/srv/scout/logs/agent/session-<time>.jsonl`. Guard blocks are logged
+in `/srv/scout/workspace/.scout-logs/guard.log`.
+
+Without `--task`, `session.sh` runs only if there's work: an open task in `agent/tasks/`, or a
+source needing attention in `scout status`. Otherwise it records "skipped" and spends nothing.
+The daily timer (task 3.4) will run it that way.
+
 ---
 
 ## Updating
@@ -652,7 +719,7 @@ When `main` on GitHub has changed (you edit it through the web UI or from your o
 cd /srv/scout/code
 git status --short                # should print nothing; the box copy is never edited
 git pull --ff-only
-sudo install -o root -g root -m 644 agent/managed-settings/managed-settings.json /srv/scout/policy/
+sudo install -o root -g root -m 644 agent/managed-settings/managed-settings.json agent/managed-settings/CLAUDE.md /srv/scout/policy/
 sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh /srv/scout/policy/hooks/
 docker compose --profile agent build agent
 agent/phase0/smoke.sh --offline
