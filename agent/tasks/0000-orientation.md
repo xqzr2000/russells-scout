@@ -1,4 +1,4 @@
-status: open
+status: done
 branch: agent/0000-orientation
 
 # 0000: Orientation

@@ -558,9 +558,10 @@ digest was written. To stop the daily digest: `sudo systemctl disable --now scou
 
 ## 18. Copies on your PC: the WSL2 sync (Phase 2, WSL2, box and Windows)
 
-Every 6 hours, and when you log in to Windows, WSL2 pulls copies of the backups and the daily
-digests from the box into `~/scout-mirror/` (`backups/`, `digests/`, `sync.log`). It uses its
-own SSH key, which the box lets do exactly one thing: download those two folders, read-only.
+Every 6 hours, and when you log in to Windows, WSL2 pulls copies of the backups, the daily
+digests and (from Phase 3) the agent's outbox from the box into `~/scout-mirror/` (`backups/`,
+`digests/`, `agent/`, `sync.log`). It uses its own SSH key, which the box lets do exactly one
+thing: download those folders, read-only.
 It can't open a shell, run commands, upload or read anything else, even if the key leaked. The
 copy never deletes anything, so a wiped box can't wipe your copies. Each pull is noted on the
 box, and the digest's health section shows "sync to WSL2: N hours ago".
@@ -650,7 +651,9 @@ session:
    `/srv/scout/logs/agent-briefing/`.
 2. It refreshes the agent's repo from `/srv/scout/code`.
 3. It runs Claude Code with 60 turns and 30 minutes.
-4. It packs the agent's branches into `/srv/scout/workspace/outbox/agent.bundle`.
+4. It packs the agent's branches into `/srv/scout/agent-outbox/agent.bundle`. That folder is
+   mounted only for this packing step, never during a session, so the agent can't write
+   there. The WSL2 sync downloads it.
 
 The agent sees `/srv/scout/code` (read-only) as `/src/main` and the briefing (read-only) as
 `/briefing`. Its rules are `agent/managed-settings/CLAUDE.md`, installed with the other locked
@@ -665,11 +668,12 @@ git pull --ff-only
 sudo install -o root -g root -m 644 agent/managed-settings/managed-settings.json agent/managed-settings/CLAUDE.md /srv/scout/policy/
 sudo install -o root -g root -m 755 agent/managed-settings/hooks/guard.sh /srv/scout/policy/hooks/
 mkdir -p /srv/scout/logs/agent-briefing /srv/scout/logs/agent
+sudo install -d -o 10001 -g "$(id -gn)" -m 2775 /srv/scout/agent-outbox
 ```
 
-Create the folders before any agent container starts. Otherwise Docker creates
-`agent-briefing` as root, and `session.sh` can't write to it. The agent image doesn't need a
-rebuild.
+Create the folders before any agent container starts. Otherwise Docker creates them as root,
+and neither `session.sh` (for the briefing) nor the packing step (for the outbox) can write
+to them. The agent image doesn't need a rebuild.
 
 **2. Check the setup:**
 
@@ -698,7 +702,7 @@ It prints `workspace: …` lines (the before-step), `session: exit … turns=…
 ```bash
 cat /srv/scout/workspace/notes/handoff.md
 tail -n 3 /srv/scout/workspace/notes/journal.md
-cat /srv/scout/workspace/outbox/manifest.txt
+cat /srv/scout/agent-outbox/manifest.txt
 cat /srv/scout/logs/agent/last-session.json
 ```
 
@@ -707,7 +711,24 @@ in `/srv/scout/workspace/.scout-logs/guard.log`.
 
 Without `--task`, `session.sh` runs only if there's work: an open task in `agent/tasks/`, or a
 source needing attention in `scout status`. Otherwise it records "skipped" and spends nothing.
-The daily timer (task 3.4) will run it that way.
+The daily timer (task 3.4) will run it that way. `agent/session.sh --pack` only repacks the
+outbox (no LLM).
+
+**4. Send the agent's work for review** (WSL2). The sync pulls the outbox into
+`~/scout-mirror/agent/` every 6 hours. To get it now:
+
+```bash
+~/scout-mirror/pull-from-box.sh        # expect backups: ok, digests: ok, agent: ok
+cat ~/scout-mirror/agent/manifest.txt  # the branches in the bundle
+explorer.exe "$(wslpath -w ~/scout-mirror/agent)"
+```
+
+The last line opens the folder in File Explorer. Drag `agent.bundle` into the chat with
+Claude. Claude fetches the branch from it, pushes it to GitHub, opens a PR and reviews it. You
+merge it, or not, as with any PR.
+
+The pull script itself changed in Phase 3 (it added `agent/`), so copy it again once:
+`scp scoutbox:/srv/scout/code/ops/sync/pull-from-box.sh ~/scout-mirror/`.
 
 ---
 

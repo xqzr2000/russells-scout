@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Forced command for the WSL2 sync key (box-setup §18): the only thing that key can run.
 #
-# It allows one kind of request: an rsync *download* of one of two folders, read-only:
+# It allows one kind of request: an rsync *download* of one of three folders, read-only:
 #   backups/   ->  /srv/scout/backups
 #   digests/   ->  /srv/scout/logs/digests
+#   agent/     ->  /srv/scout/agent-outbox   (the agent's bundle and notes; Phase 3)
 # Everything else is refused: a shell, any other command or folder, any upload. The real
 # work is done by rrsync -ro, rsync's own restricted mode. After a successful download it
 # writes the time to /srv/scout/logs/sync/last-sync, which the daily digest shows.
@@ -18,7 +19,7 @@ STAMP_DIR=${SCOUT_SYNC_STAMP_DIR:-$SCOUT_HOME/logs/sync}
 RRSYNC=${SCOUT_RRSYNC:-rrsync}
 
 refuse() {
-  echo "scout-sync: refused: $1. This key can only download backups/ or digests/ with rsync." >&2
+  echo "scout-sync: refused: $1. This key can only download backups/, digests/ or agent/ with rsync." >&2
   exit 1
 }
 
@@ -33,8 +34,10 @@ fi
 case ${words[-1]} in
   backups | backups/) root=$SCOUT_HOME/backups ;;
   digests | digests/) root=$SCOUT_HOME/logs/digests ;;
+  agent | agent/) root=$SCOUT_HOME/agent-outbox ;;
   *) refuse "unknown folder '${words[-1]}'" ;;
 esac
+[[ -d $root && ! -L $root ]] || refuse "folder '${words[-1]%/}' isn't there"
 
 words[-1]=./
 SSH_ORIGINAL_COMMAND="${words[*]}" "$RRSYNC" -ro "$root"

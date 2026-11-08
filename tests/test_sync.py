@@ -34,6 +34,9 @@ def box(tmp_path):
     (home / "logs" / "digests" / "latest.txt").write_text("Scout: 3 new jobs\n")
     (home / "secrets").mkdir()
     (home / "secrets" / "db-roles.env").write_text("SCOUT_READER_PASSWORD=secret\n")
+    (home / "agent-outbox" / "notes").mkdir(parents=True)
+    (home / "agent-outbox" / "agent.bundle").write_bytes(b"# v2 git bundle\n")
+    (home / "agent-outbox" / "notes" / "handoff.md").write_text("rules: scout-rules-1\n")
     fake_ssh = tmp_path / "fake-ssh"
     fake_ssh.write_text(
         "#!/usr/bin/env bash\n"
@@ -100,6 +103,33 @@ def test_other_downloads_are_refused(box, tmp_path, args, why):
 
 
 @needs_rsync
+def test_downloads_the_agent_outbox_but_never_a_link(box, tmp_path):
+    home, _ = box
+    # A link the agent might have managed to leave: skipped, never copied or followed.
+    (home / "agent-outbox" / "notes" / "secret.md").symlink_to(home / "secrets" / "db-roles.env")
+    (home / "agent-outbox" / "keys").symlink_to(home / "secrets")
+    out = tmp_path / "agent"
+    r = rsync(box, "box:agent/", str(out))
+    assert r.returncode == 0, r.stderr
+    assert (out / "agent.bundle").read_bytes().startswith(b"# v2 git bundle")
+    assert (out / "notes" / "handoff.md").exists()
+    assert not (out / "notes" / "secret.md").exists() and not (out / "keys").exists()
+    assert not any(p.is_symlink() for p in out.rglob("*"))
+
+
+@needs_rsync
+def test_agent_outbox_must_be_a_real_folder(box, tmp_path):
+    home, _ = box
+    shutil.rmtree(home / "agent-outbox")
+    r = rsync(box, "box:agent/", str(tmp_path / "a"))
+    assert r.returncode != 0 and "isn't there" in r.stderr
+    (home / "agent-outbox").symlink_to(home / "secrets")
+    r = rsync(box, "box:agent/", str(tmp_path / "a"))
+    assert r.returncode != 0 and "isn't there" in r.stderr
+    assert not (tmp_path / "a" / "db-roles.env").exists()
+
+
+@needs_rsync
 def test_uploads_are_refused(box, tmp_path):
     src = tmp_path / "evil.txt"
     src.write_text("x")
@@ -134,8 +164,9 @@ def test_pull_script_end_to_end(box, tmp_path):
            "SCOUT_SYNC_SSH": str(fake_ssh)}  # fmt: skip
     r = subprocess.run(["bash", str(PULL)], env=env, capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "backups: ok" in r.stdout and "digests: ok" in r.stdout
+    assert "backups: ok" in r.stdout and "digests: ok" in r.stdout and "agent: ok" in r.stdout
     assert (mirror / "digests" / "latest.txt").exists()
+    assert (mirror / "agent" / "agent.bundle").exists()
     # Something deleted on the box stays in the mirror.
     (box[0] / "backups" / "scout-20261101-033000.dump").unlink()
     subprocess.run(["bash", str(PULL)], env=env, capture_output=True, text=True, check=True)
@@ -148,6 +179,7 @@ def test_pull_script_reports_failure(tmp_path):
     r = subprocess.run(["bash", str(PULL)], env=env, capture_output=True, text=True, check=False)
     assert r.returncode == 1
     assert "backups: FAILED" in r.stdout and "digests: FAILED" in r.stdout
+    assert "agent: FAILED" in r.stdout
 
 
 def add_key(tmp_path, *args):
