@@ -1,7 +1,8 @@
 # Phase 2 plan: runs on its own, daily digest, backups, sync
 
-Status: **in progress** (2026-10-31). 2.1–2.3 running on the box; 2.6 built. No email: the
-digest is a file on the box that you read yourself (§5).
+Status: **done** (2026-11-07): a week unattended, all exit criteria met
+([phase2-results.md](phase2-results.md)). No email: the digest is a file on the box that you
+read yourself (§5).
 Architecture plan: [architecture-plan.md](architecture-plan.md) §7, §10, §11, §13.
 Still zero LLM tokens: nothing in Phase 2 involves the agent.
 
@@ -118,8 +119,8 @@ HEALTH
 | 2.3 | **Digest:** migrations 0005–0006 (`digests`); `scout digest [--dry-run]`; `digest` service; `scout-digest.timer` | a digest file on the box with the real jobs; tests cover "since last digest", empty days and a failed write. **Done** (2026-10-31: first digest written) |
 | 2.4 | ~~Email~~ | **Dropped** (2026-10-31): Gmail app passwords aren't available for your account; you read the digest yourself |
 | 2.5 | ~~Health alerts~~ | **Dropped** with email: problems go at the top of the digest instead |
-| 2.6 | **WSL2 sync:** the restricted read-only key on the box (`ops/sync/`), the pull script for WSL2 (backups and digests), Task Scheduler steps | backups and digests appear in WSL2; the key can't open a shell; the digest shows the sync time. **Built**: `ops/sync/` (gate with `rrsync -ro`, key installer, pull script), box setup §18 |
-| 2.7 | **A week unattended** and `docs/phase2-results.md` | 7 digests in a row; no missed sweeps; backups and sync current |
+| 2.6 | **WSL2 sync:** the restricted read-only key on the box (`ops/sync/`), the pull script for WSL2 (backups and digests), Task Scheduler steps | backups and digests appear in WSL2; the key can't open a shell; the digest shows the sync time. **Done** (2026-10-31): `ops/sync/` (gate with `rrsync -ro`, key installer, pull script), box setup §18 |
+| 2.7 | **A week unattended** and `docs/phase2-results.md` | 7 digests in a row; no missed sweeps; backups and sync current. **Done** (2026-11-07): 14/14 sweeps, 7 digests, 7 backups ([results](phase2-results.md)) |
 
 Each task is one PR, as in Phase 1 (2.1 and 2.2 shared one).
 

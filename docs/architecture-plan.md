@@ -523,7 +523,7 @@ removed; no LLM calls.
 
 ### Phase 2 — Runtime, digest, sync, backups
 
-**In progress:** [phase2-plan.md](phase2-plan.md) (scheduling by host systemd timers instead of an always-on container). Scout runtime container with scheduler; supervisor and mailer; DB backups; WSL2 sync script, Task Scheduler job and restricted sync key. Exit: runs unattended for a week without the agent; digest arrives daily and shows sync status.
+**Done (2026-11-07):** [phase2-results.md](phase2-results.md). Build plan: [phase2-plan.md](phase2-plan.md) (scheduling by host systemd timers instead of an always-on container; no email, the digest is a file). Scout runtime container with scheduler; supervisor and mailer; DB backups; WSL2 sync script, Task Scheduler job and restricted sync key. Exit: runs unattended for a week without the agent; digest arrives daily and shows sync status.
 
 ### Phase 3 — The agent takes over
 
