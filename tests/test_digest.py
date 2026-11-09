@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime, timedelta
 
@@ -94,6 +95,102 @@ def test_prune_keeps_90_days_and_other_files(tmp_path):
 
 
 # --------------------------------------------------------------------------- health files
+
+
+def agent_logs(tmp_path, entries):
+    (tmp_path / "logs" / "agent").mkdir(parents=True, exist_ok=True)
+    lines = [e if isinstance(e, str) else json.dumps(e) for e in entries]
+    (tmp_path / "logs" / "agent" / "sessions.log").write_text("\n".join(lines) + "\n")
+    return tmp_path / "logs"
+
+
+def agent_health(logs, outbox, frm, to):
+    health, problems = [], []
+    digest._agent_health(logs, outbox, frm, to, health, problems)
+    return health, problems
+
+
+AGENT_TO = datetime(2026, 11, 9, 14, 10, tzinfo=UTC)  # 07:10 Vancouver
+AGENT_FROM = AGENT_TO - timedelta(days=1)
+
+
+def test_agent_health_without_sessions_is_quiet(tmp_path):
+    health, problems = agent_health(tmp_path, tmp_path / "none", AGENT_FROM, AGENT_TO)
+    assert health == ["agent: no sessions yet"] and problems == []
+
+
+def test_agent_health_counts_sessions_and_flags_bad_ones(tmp_path):
+    logs = agent_logs(tmp_path, [
+        {"time": "2026-11-07T10:21:00-0700", "outcome": "turn_limit", "task": "0001"},  # older
+        "not json",
+        {"time": "2026-11-08T10:21:00-0700", "outcome": "skipped", "task": None},
+        {"time": "2026-11-08T12:00:00-0700", "outcome": "timeout", "task": "0002",
+         "detail": "hit the 1800s time limit"},
+        {"time": "2026-11-08T13:00:00-0700", "outcome": "ran", "task": "0002", "turns": 41},
+    ])  # fmt: skip
+    health, problems = agent_health(logs, tmp_path / "none", AGENT_FROM, AGENT_TO)
+    assert health == [
+        "agent: 3 check(s) since the last digest (ran 1, skipped 1, timeout 1);"
+        " last: ran 18 hours ago, task 0002, 41 turns"
+    ]
+    assert len(problems) == 1
+    assert "ended with timeout" in problems[0] and "task 0002" in problems[0]
+    assert "1800s" in problems[0]
+
+
+def test_agent_health_notices_a_stopped_timer(tmp_path):
+    logs = agent_logs(tmp_path, [{"time": "2026-11-06T10:21:00-0700", "outcome": "skipped"}])
+    health, problems = agent_health(logs, tmp_path / "none", AGENT_FROM, AGENT_TO)
+    assert health[0].startswith("agent: 0 check(s) since the last digest; last: skipped")
+    assert len(problems) == 1 and "scout-agent.timer" in problems[0]
+
+
+def test_agent_health_reads_the_outbox(tmp_path):
+    logs = agent_logs(tmp_path, [{"time": "2026-11-08T10:21:00-0700", "outcome": "ran"}])
+    out = tmp_path / "outbox"
+    (out / "notes").mkdir(parents=True)
+    (out / "manifest.txt").write_text(
+        "time=2026-11-08T17:30:00+00:00\norigin_main=24b1d28\n"
+        "branch=agent/0001-workday 0cde13b 2026-11-08T04:54:02+00:00 Older work\n"
+        "branch=agent/0002-amazon 1a2b3c4 2026-11-08T17:25:00+00:00 Read Amazon jobs\n"
+    )
+    (out / "notes" / "handoff.md").write_text(
+        "rules: scout-rules-2\n\n## Done\n\n- things\n\n## Needs your attention\n\n"
+        "- The <b>site</b> needs a new column:\n  posting_type.\n- Second point\n\n## Next\n"
+    )
+    (out / "guard.log").write_text(
+        '{"time":"2026-11-08T17:00:00Z","reason":"x"}\n'
+        '{"time":"2026-11-01T17:00:00Z","reason":"old"}\nbroken\n'
+    )
+    health, problems = agent_health(logs, out, AGENT_FROM, AGENT_TO)
+    assert "agent: the guard blocked 1 action(s) since the last digest" in health
+    assert "agent asks: The <b>site</b> needs a new column: posting_type." in health
+    assert "agent asks: Second point" in health
+    assert len(problems) == 1 and "agent/0002-amazon (Read Amazon jobs)" in problems[0]
+    assert "agent.bundle" in problems[0]
+
+    # An old handoff (not changed since the last digest) isn't repeated.
+    old = (AGENT_FROM - timedelta(hours=1)).timestamp()
+    os.utime(out / "notes" / "handoff.md", (old, old))
+    health, _ = agent_health(logs, out, AGENT_FROM, AGENT_TO)
+    assert not any(h.startswith("agent asks") for h in health)
+
+
+def test_handoff_nothing_and_long_lines(tmp_path):
+    f = tmp_path / "h.md"
+    f.write_text("## Needs your attention\n\n- nothing\n")
+    assert digest._handoff_asks(f) == []
+    f.write_text("## Needs your attention\n\n- " + "x" * 500 + "\n")
+    [ask] = digest._handoff_asks(f)
+    assert len(ask) == digest.AGENT_LINE_MAX and ask.endswith("…")
+
+
+def test_agent_lines_are_escaped_in_html():
+    d = sample_digest(problems=["Agent work to review: agent/x (<script>)"])
+    d.health.append("agent asks: <img src=x>")
+    page = d.html()
+    assert "<script>" not in page and "<img" not in page
+    assert "&lt;script&gt;" in page and "&lt;img src=x&gt;" in page
 
 
 def test_backup_and_sync_health(tmp_path):

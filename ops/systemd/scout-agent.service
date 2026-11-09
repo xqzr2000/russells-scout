@@ -1,0 +1,18 @@
+# Installed by ops/systemd/install.sh, which fills in @USER@, @SCOUT_HOME@ and @DOCKER@.
+[Unit]
+Description=Scout: one agent session, only if there's work (docs/phase3-plan.md §3)
+Documentation=file://@SCOUT_HOME@/code/docs/box-setup.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@SCOUT_HOME@/code
+Environment=SCOUT_HOME=@SCOUT_HOME@
+# agent/session.sh starts a session only for an open task in agent/tasks/ or a source that
+# needs attention; otherwise it records "skipped" and makes no API call. The session itself
+# stops after 30 minutes; the rest covers the briefing and the before and after steps.
+TimeoutStartSec=45min
+ExecStart=@SCOUT_HOME@/code/agent/session.sh

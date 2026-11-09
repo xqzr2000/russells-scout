@@ -555,6 +555,7 @@ you can copy one over from WSL2:
 
 Digest files older than 90 days are deleted automatically. `scout status` shows when the last
 digest was written. To stop the daily digest: `sudo systemctl disable --now scout-digest.timer`.
+From Phase 3 the health section also covers the agent (§19, step 5).
 
 ---
 
@@ -713,7 +714,7 @@ in `/srv/scout/workspace/.scout-logs/guard.log`.
 
 Without `--task`, `session.sh` runs only if there's work: an open task in `agent/tasks/`, or a
 source needing attention in `scout status`. Otherwise it records "skipped" and spends nothing.
-The daily timer (task 3.4) will run it that way. `agent/session.sh --pack` only repacks the
+The daily timer (step 5) runs it that way. `agent/session.sh --pack` only repacks the
 outbox (no LLM).
 
 **4. Send the agent's work for review** (WSL2). The sync pulls the outbox into
@@ -731,6 +732,38 @@ merge it, or not, as with any PR.
 
 The pull script itself changed in Phase 3 (it added `agent/`), so copy it again once:
 `scp scoutbox:/srv/scout/code/ops/sync/pull-from-box.sh ~/scout-mirror/`.
+
+**5. The daily agent timer** (task 3.4). `scout-agent.timer` runs `agent/session.sh` every
+day at 10:20, after the morning sweep and digest. 10:20 Vancouver is 17:20 UTC, which is
+outside DeepSeek's peak hours. The session starts only if there's an open task or a source
+needs attention. On a quiet day it records "skipped" and makes no API call. It's installed
+with the other timers:
+
+```bash
+cd /srv/scout/code
+sudo ops/systemd/install.sh            # now lists four timers, scout-agent among them
+systemctl list-timers 'scout-*' --no-pager
+sudo systemctl start scout-agent.service   # try it now: expect "skipped" (no open task)
+journalctl -u scout-agent -n 20 --no-pager
+cat /srv/scout/logs/agent/last-session.json
+```
+
+The digest's health section now has **agent** lines:
+- how many checks ran since the last digest, and how the last one ended;
+- guard blocks;
+- the agent's "Needs your attention" points, when its handoff is new.
+
+**Needs your attention** at the top of the digest also lists:
+- sessions that failed, timed out or hit the turn limit;
+- two days with no agent check, which means the timer stopped;
+- new agent branches to review. To review one, pull it to WSL2 and attach `agent.bundle` in
+  chat.
+
+The digest reads the outbox read-only, and shows the agent's words as plain text.
+
+To pause the agent without touching anything else:
+`sudo systemctl disable --now scout-agent.timer`. To turn it back on:
+`sudo ops/systemd/install.sh`.
 
 ---
 

@@ -1,0 +1,12 @@
+# Installed by ops/systemd/install.sh.
+[Unit]
+Description=Scout: agent check every morning at 10:20, after the sweep and the digest
+
+[Timer]
+# 10:20 Vancouver is 17:20 UTC: outside DeepSeek's peak hours (half price).
+OnCalendar=*-*-* 10:20:00 America/Vancouver
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

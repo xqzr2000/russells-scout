@@ -15,17 +15,27 @@ Pairs older than KEEP_DAYS are deleted. Nothing leaves the box: there is no emai
 
 Reads the database as scout_reader; records the digest as scout_ingest. Box files it reads
 (mounted read-only under $SCOUT_LOGS_DIR, default /data/logs):
-  backup-status   written by ops/backup.sh
-  sync/last-sync  written each time WSL2 pulls the backups (task 2.6)
+  backup-status        written by ops/backup.sh
+  sync/last-sync       written each time WSL2 pulls the backups (task 2.6)
+  agent/sessions.log   one JSON line per agent session or skip, by agent/session.sh (Phase 3)
+and from the agent's outbox ($SCOUT_AGENT_OUTBOX, default /data/agent-outbox, read-only;
+written only by the no-LLM after-step, docs/phase3-plan.md §4):
+  manifest.txt         the agent's branches; ones updated since the last digest need review
+  notes/handoff.md     its "Needs your attention" section, shown when the handoff is new
+  guard.log            guard-hook blocks
+Everything from the outbox was written by the agent: it is shown as plain text, never acted
+on, and clipped.
 """
 
 from __future__ import annotations
 
 import html
+import json
 import os
 import re
 import shutil
 from dataclasses import dataclass, field
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -39,6 +49,9 @@ NO_SWEEP_HOURS = 24
 BACKUP_MAX_HOURS = 36
 SYNC_MAX_HOURS = 48
 DISK_MIN_GB = 5.0
+AGENT_MAX_HOURS = 48  # the agent timer checks daily (skipped or ran), so 2 days means it stopped
+AGENT_BAD = ("failed", "timeout", "turn_limit")
+AGENT_LINE_MAX = 200
 KEEP_DAYS = 90
 STAMP_RE = r"^\d{4}-\d{2}-\d{2}-\d{4}$"
 
@@ -268,9 +281,139 @@ def _disk_health(logs: Path, health: list[str], problems: list[str]) -> None:
         problems.append(f"Only {free:.1f} GB of disk left on the box.")
 
 
-def gather(conn, logs_dir: Path | None = None, limit: int = LIST_LIMIT) -> Digest:
+def _when(value: object) -> datetime | None:
+    try:
+        when = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=UTC)
+
+
+def _clip(text: object, n: int = AGENT_LINE_MAX) -> str:
+    text = " ".join(str(text).split())
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def _agent_sessions(logs: Path) -> list[tuple[datetime, dict]] | None:
+    try:
+        lines = (logs / "agent" / "sessions.log").read_text(errors="replace").splitlines()
+    except OSError:
+        return None
+    out = []
+    for line in lines[-1000:]:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        when = _when(entry.get("time")) if isinstance(entry, dict) else None
+        if when:
+            out.append((when, entry))
+    return out
+
+
+def _handoff_asks(path: Path) -> list[str]:
+    """The lines under "## Needs your attention" in the agent's handoff, minus "nothing"."""
+    try:
+        text = path.read_text(errors="replace")[:65536]
+    except OSError:
+        return []
+    asks, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line[3:].strip().casefold() == "needs your attention"
+            continue
+        item = line.strip().lstrip("-* ").strip()
+        if inside and item and item.casefold().rstrip(".") != "nothing":
+            if line[:1] in "-*" or not asks:
+                asks.append(item)
+            else:  # a wrapped continuation line
+                asks[-1] += " " + item
+    return [_clip(a) for a in asks[:5]]
+
+
+def _agent_health(
+    logs: Path, outbox: Path, frm: datetime, to: datetime, health: list[str],
+    problems: list[str],
+) -> None:  # fmt: skip
+    """Agent sessions since the last digest, and what the agent left for review."""
+    sessions = _agent_sessions(logs)
+    if not sessions:
+        health.append("agent: no sessions yet")
+        return
+    recent = [(w, e) for w, e in sessions if frm < w <= to]
+    counts = Counter(str(e.get("outcome")) for _w, e in recent)
+    order = ["ran", "skipped", *AGENT_BAD]
+    summary = ", ".join(f"{k} {counts[k]}" for k in order + sorted(set(counts) - set(order))
+                        if counts[k])  # fmt: skip
+    last_w, last = sessions[-1]
+    last_text = f"{last.get('outcome')} {_ago(_hours_ago(last_w, to))}"
+    if last.get("task"):
+        last_text += f", task {last.get('task')}"
+    if last.get("turns") is not None:
+        last_text += f", {last.get('turns')} turns"
+    health.append(
+        f"agent: {len(recent)} check(s) since the last digest"
+        + (f" ({summary})" if summary else "")
+        + f"; last: {last_text}"
+    )
+    for w, e in recent:
+        if e.get("outcome") in AGENT_BAD:
+            problems.append(
+                f"An agent session ended with {e.get('outcome')} ({_ago(_hours_ago(w, to))},"
+                f" task {e.get('task')}): {_clip(e.get('detail', ''), 120)}."
+                " See /srv/scout/logs/agent/last-session.json and its transcript."
+            )
+    if _hours_ago(last_w, to) > AGENT_MAX_HOURS:
+        problems.append(
+            f"No agent check for {_ago(_hours_ago(last_w, to)).removesuffix(' ago')}:"
+            " is scout-agent.timer running? (`systemctl list-timers 'scout-*'`)"
+        )
+
+    # From the outbox: what the agent wrote. Plain text only, clipped.
+    blocks = 0
+    try:
+        for line in (outbox / "guard.log").read_text(errors="replace").splitlines():
+            try:
+                when = _when(json.loads(line).get("time"))
+            except (ValueError, AttributeError):
+                continue
+            if when and frm < when <= to:
+                blocks += 1
+    except OSError:
+        pass
+    if blocks:
+        health.append(f"agent: the guard blocked {blocks} action(s) since the last digest")
+    handoff = outbox / "notes" / "handoff.md"
+    try:
+        handoff_new = datetime.fromtimestamp(handoff.stat().st_mtime, UTC) > frm
+    except OSError:
+        handoff_new = False
+    if handoff_new:
+        for ask in _handoff_asks(handoff):
+            health.append(f"agent asks: {ask}")
+    try:
+        manifest = (outbox / "manifest.txt").read_text(errors="replace").splitlines()
+    except OSError:
+        manifest = []
+    for line in manifest:
+        if not line.startswith("branch="):
+            continue
+        parts = line[len("branch=") :].split(" ", 3)
+        when = _when(parts[2]) if len(parts) >= 3 else None
+        if when and frm < when <= to:
+            subject = _clip(parts[3], 100) if len(parts) == 4 else ""
+            problems.append(
+                f"Agent work to review: {_clip(parts[0], 80)} ({subject}). Pull it to WSL2 and"
+                " attach ~/scout-mirror/agent/agent.bundle in chat with Claude."
+            )
+
+
+def gather(
+    conn, logs_dir: Path | None = None, limit: int = LIST_LIMIT, outbox_dir: Path | None = None
+) -> Digest:
     tz = os.environ.get("SCOUT_TZ", "America/Vancouver")
     logs = logs_dir or Path(os.environ.get("SCOUT_LOGS_DIR", "/data/logs"))
+    outbox = outbox_dir or Path(os.environ.get("SCOUT_AGENT_OUTBOX", "/data/agent-outbox"))
 
     def one(sql, *params):
         return conn.execute(sql, params).fetchone()
@@ -372,6 +515,7 @@ def gather(conn, logs_dir: Path | None = None, limit: int = LIST_LIMIT) -> Diges
     _backup_health(logs, to, health, problems)
     _sync_health(logs, to, health, problems)
     _disk_health(logs, health, problems)
+    _agent_health(logs, outbox, frm, to, health, problems)
 
     return Digest(
         covers_from=frm, covers_to=to, day=day, stamp=stamp, since=since, first=first,
@@ -440,6 +584,7 @@ def run(
     out=print,
     logs_dir: Path | None = None,
     digests_dir: Path | None = None,
+    outbox_dir: Path | None = None,
 ) -> int:
     try:
         reader = db.connect("reader")
@@ -447,7 +592,7 @@ def run(
         out(f"ERROR: {e}")
         return 1
     with reader:
-        d = gather(reader, logs_dir=logs_dir)
+        d = gather(reader, logs_dir=logs_dir, outbox_dir=outbox_dir)
 
     if dry_run:
         out(d.text().rstrip("\n"))
