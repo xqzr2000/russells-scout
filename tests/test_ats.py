@@ -143,6 +143,8 @@ def test_find_greenhouse_board_needs_the_exact_job():
 # --------------------------------------------------------------------------- Workday
 
 WD_SEARCH = (FIX / "workday_fabrikam_search.json").read_bytes()
+WD_SEARCH_ONE_BAD = (FIX / "workday_fabrikam_search_one_bad.json").read_bytes()
+WD_SEARCH_ALL_BAD = (FIX / "workday_fabrikam_search_all_bad.json").read_bytes()
 WD_JOB_123 = (FIX / "workday_fabrikam_job_123.json").read_bytes()
 WD_JOB_125 = (FIX / "workday_fabrikam_job_125.json").read_bytes()
 WD_JOB_126 = (FIX / "workday_fabrikam_job_126.json").read_bytes()
@@ -273,6 +275,19 @@ def test_workday_failures_map_like_other_boards(error, outcome):
     post = FakePost(WD_SEARCH, {}, errors=[error] * (ats.RETRIES + 1))
     res, _, _ = wd_fetch(post=post)
     assert res.outcome == outcome
+
+
+def test_workday_skips_an_unusable_item_and_keeps_the_board():
+    res, _, _ = wd_fetch(post=FakePost(WD_SEARCH_ONE_BAD, {}), terms=("data analyst",))
+    assert res.outcome == "ok" and res.error is None
+    assert [p.posting_id for p in res.postings] == ["R201"]
+    assert res.skipped == 1
+
+
+def test_workday_a_page_with_no_usable_item_is_structural():
+    res, _, _ = wd_fetch(post=FakePost(WD_SEARCH_ALL_BAD, {}), terms=("data analyst",))
+    assert res.outcome == "structural" and "unusable" in res.error
+    assert res.postings == [] and res.skipped == 3
 
 
 def test_workday_unexpected_response_is_structural():

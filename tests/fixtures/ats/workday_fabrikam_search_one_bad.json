@@ -1,0 +1,19 @@
+{
+  "total": 2,
+  "jobPostings": [
+    {
+      "title": "Data Analyst",
+      "externalPath": "/job/Vancouver-BC/Data-Analyst_R201",
+      "locationsText": "Vancouver, British Columbia, Canada",
+      "postedOn": "Posted 2 Days Ago",
+      "bulletFields": ["R201"]
+    },
+    {
+      "locationsText": "Burnaby, British Columbia, Canada",
+      "postedOn": "Posted 4 Days Ago",
+      "bulletFields": ["R202"]
+    }
+  ],
+  "facets": {},
+  "userAuthenticated": false
+}
