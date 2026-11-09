@@ -161,6 +161,18 @@ def one(conn, sql, *params):
     return conn.execute(sql, params).fetchone()
 
 
+def test_report_shows_skipped_items(capsys):
+    stats = enrich.EnrichStats(
+        boards=[enrich.BoardStats("workday", "fabrikam/Careers", on_board=1, skipped=2)]
+    )
+    enrich.report(stats)
+    line = next(
+        line for line in capsys.readouterr().out.splitlines()
+        if "workday:fabrikam/Careers" in line
+    )  # fmt: skip
+    assert line.split()[:4] == ["workday:fabrikam/Careers", "ok", "1", "2"]
+
+
 @needs_db
 def test_enrichment_matches_adds_and_discovers(conn):
     sweep_save(conn)
