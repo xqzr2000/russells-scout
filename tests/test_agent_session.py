@@ -25,7 +25,18 @@ needs_tools = pytest.mark.skipif(
 )
 
 STATUS_OK = "== postings\n  active 186\n\n== sources needing attention: none\n"
-STATUS_BROKEN = "== postings\n  active 186\n\n== sources needing attention\n  workbc: structural\n"
+
+
+def status_with(*lines):
+    """`scout status` output with these lines under "sources needing attention"."""
+    body = "".join(f"  {line}\n" for line in lines)
+    return f"== postings\n  active 186\n\n== sources needing attention\n{body}\n== newest relevant jobs\n"
+
+
+STATUS_BROKEN = status_with(
+    "workday:accenture/AccentureCareers: active, 1 failure(s) in a row, last structural:"
+    " unexpected response: posting 1 has no title or externalPath"
+)
 
 
 def git(cwd, *args):
@@ -329,8 +340,34 @@ def test_source_needing_attention_starts_a_repair(box):
     box["status"].write_text(STATUS_BROKEN)
     r = session(box)
     assert r.returncode == 0, r.stderr
+    assert "sources needing repair: workday:accenture/AccentureCareers" in r.stdout
     assert any("Task: repair." in c for c in calls(box))
     assert last(box)["task"] == "repair"
+    s = (box["home"] / "logs" / "agent-briefing" / "session.txt").read_text()
+    assert "repair_sources: workday:accenture/AccentureCareers" in s
+
+
+@needs_tools
+@pytest.mark.parametrize(
+    "line, repair",
+    [
+        ("greenhouse:x: active, 1 failure(s) in a row, last transient: timed out", False),
+        ("greenhouse:x: active, 2 failure(s) in a row, last transient: HTTP 503", False),
+        ("greenhouse:x: active, 3 failure(s) in a row, last transient: HTTP 503", True),
+        ("lever:y: degraded, 1 failure(s) in a row, last transient", True),
+        ("ashby:z: restricted, 5 failure(s) in a row, last restricted: HTTP 403", False),
+        ("ashby:z: disabled, 0 failure(s) in a row, last structural", False),
+        ("workbc: active, 1 failure(s) in a row, last structural: no results key", True),
+    ],
+)  # fmt: skip
+def test_only_real_breakage_starts_a_repair(box, line, repair):
+    # One network blip isn't worth a paid session; a blocked site is left alone.
+    box["status"].write_text(status_with(line))
+    r = session(box)
+    assert r.returncode == 0, r.stderr
+    started = any("Task: repair." in c for c in calls(box))
+    assert started is repair
+    assert last(box)["outcome"] == ("ran" if repair else "skipped")
 
 
 @needs_tools

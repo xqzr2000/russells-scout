@@ -124,7 +124,11 @@ What `agent/session.sh` does on the host (as `shaw2012`, by timer or by hand):
 
 1. **Lock:** if a session is already running, it prints that and exits.
 2. **Gate:** it starts a session only if there's an open task in `/srv/scout/code/agent/tasks/`
-   or `scout status` shows a source needing attention. Otherwise it records "skipped: nothing to
+   or a source needs repair. That means `scout status` lists it with a `structural` last
+   failure, 3 or more failures in a row, or status `degraded`. A single transient failure
+   doesn't count, and neither does a `restricted` or `disabled` source. (Tightened on
+   2026-11-09: until then any listed source counted, so one network blip could have started a
+   paid session.) Otherwise it records "skipped: nothing to
    do" and exits, with zero tokens. `--task <id>` runs one task by hand; `--force` skips the
    gate.
 3. **Briefing:** it writes `status.txt`, the latest digest, `boards.csv` and `session.txt` (the

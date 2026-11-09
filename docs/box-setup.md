@@ -713,7 +713,8 @@ The full transcript is `/srv/scout/logs/agent/session-<time>.jsonl`. Guard block
 in `/srv/scout/workspace/.scout-logs/guard.log`.
 
 Without `--task`, `session.sh` runs only if there's work: an open task in `agent/tasks/`, or a
-source needing attention in `scout status`. Otherwise it records "skipped" and spends nothing.
+source that needs repair. That means `scout status` lists it with a structural failure, 3
+failures in a row, or status degraded; a single network blip doesn't count. Otherwise it records "skipped" and spends nothing.
 The daily timer (step 5) runs it that way. `agent/session.sh --pack` only repacks the
 outbox (no LLM).
 
