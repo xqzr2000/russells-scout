@@ -1,0 +1,26 @@
+{
+  "total": 3,
+  "jobPostings": [
+    {
+      "externalPath": "/job/Vancouver-BC/No-Title_R301",
+      "locationsText": "Vancouver, British Columbia, Canada",
+      "postedOn": "Posted 1 Day Ago",
+      "bulletFields": ["R301"]
+    },
+    {
+      "title": "Data Scientist",
+      "locationsText": "Burnaby, British Columbia, Canada",
+      "postedOn": "Posted 3 Days Ago",
+      "bulletFields": ["R302"]
+    },
+    {
+      "title": "Machine Learning Engineer",
+      "externalPath": "/job/Remote/Machine-Learning-Engineer_",
+      "locationsText": "Remote, Canada",
+      "postedOn": "Posted 5 Days Ago",
+      "bulletFields": []
+    }
+  ],
+  "facets": {},
+  "userAuthenticated": false
+}

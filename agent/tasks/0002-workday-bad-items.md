@@ -1,4 +1,4 @@
-status: open
+status: done
 branch: agent/0002-workday-bad-items
 
 # 0002: Repair: one bad Workday item must not fail the whole board

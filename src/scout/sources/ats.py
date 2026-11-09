@@ -17,6 +17,10 @@ The search is run once per configured term (all pages of each, 20 per page) so t
 is the same set every run. Details are only fetched for postings Scout would keep: a WorkBC
 posting on the board, or a title that matches a term in Metro Vancouver or remote.
 
+A search item with no title, `externalPath` or posting id is skipped and counted in
+`BoardResult.skipped`; the other items on the page still count. A response that is not
+JSON, has no `jobPostings` list, or whose page has no usable item at all is `structural`.
+
 Each board is turned into a list of `BoardPosting` with the same fields whatever the ATS.
 Workplace comes from the ATS's own field (Ashby `workplaceType`, Lever `workplaceType`),
 never from Ashby's `isRemote`, which is also true for hybrid jobs. Greenhouse's board list
@@ -125,6 +129,7 @@ class BoardResult:
     postings: list[BoardPosting] = field(default_factory=list)
     error: str | None = None
     url: str | None = None
+    skipped: int = 0  # unusable items passed over (Workday search results)
 
     @property
     def ok(self) -> bool:
@@ -502,19 +507,25 @@ def _fetch_workday(
                 res.postings = []
                 return res
             items = data["jobPostings"]
+            usable = 0
             for i, item in enumerate(items):
                 try:
                     bp, path = _workday_list_item(board, host, site, item, metro, i)
-                except ValueError as e:
-                    res.outcome, res.error, res.postings = (
-                        "structural",
-                        f"unexpected response: {e}",
-                        [],
-                    )
-                    return res
+                except ValueError:
+                    # Workday sometimes returns an odd item. Skip it: one bad item must not
+                    # lose the board. A page where *every* item is unusable is a real
+                    # format change, handled below.
+                    res.skipped += 1
+                    continue
+                usable += 1
                 if bp.posting_id not in seen:
                     seen[bp.posting_id] = bp
                     paths[bp.posting_id] = path
+            if items and not usable:
+                res.outcome = "structural"
+                res.error = f"unexpected response: all {len(items)} postings on page are unusable"
+                res.postings = []
+                return res
             offset += WORKDAY_PAGE_SIZE
             total = data.get("total")
             if len(items) < WORKDAY_PAGE_SIZE or (

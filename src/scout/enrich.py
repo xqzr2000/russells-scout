@@ -58,6 +58,7 @@ class BoardStats:
     outcome: str = "ok"
     error: str | None = None
     on_board: int = 0
+    skipped: int = 0
     matched: int = 0
     with_pay: int = 0
     with_description: int = 0
@@ -396,7 +397,9 @@ def enrich(
             ats, board, get=get, post=post, sleep=sleep, host=host,
             terms=cfg.terms, metro=cfg.area.metro, keep_ids=keep_ids,
         )  # fmt: skip
-        bs = BoardStats(ats, board, res.outcome, res.error, on_board=len(res.postings))
+        bs = BoardStats(
+            ats, board, res.outcome, res.error, on_board=len(res.postings), skipped=res.skipped
+        )
         if dry_run:
             _apply_board(conn, res, cfg, None, bs, dry_run=True)
         else:
@@ -429,12 +432,16 @@ def report(stats: EnrichStats, out=print, dry_run: bool = False) -> None:
         out(f"  Greenhouse boards found from company links: {found}")
         if stats.not_found:
             out(f"  not found (re-tried in {BOARD_RECHECK}): {', '.join(stats.not_found)}")
-    out(f"  {'board':34} {'outcome':10} {'on board':>8} {'matched':>7} {'pay':>4} {'new':>4}  note")
+    out(
+        f"  {'board':34} {'outcome':10} {'on board':>8} {'skipped':>7} {'matched':>7}"
+        f" {'pay':>4} {'new':>4}  note"
+    )
     for b in stats.boards:
         name = f"{b.ats}:{b.board}"
         out(
-            f"  {name:34} {b.outcome:10} {b.on_board:>8} {b.matched:>7} {b.with_pay:>4}"
-            f" {b.new if not dry_run else len(b.candidates):>4}  {b.error or ''}"
+            f"  {name:34} {b.outcome:10} {b.on_board:>8} {b.skipped:>7} {b.matched:>7}"
+            f" {b.with_pay:>4} {b.new if not dry_run else len(b.candidates):>4}"
+            f"  {b.error or ''}"
         )
     matched = sum(b.matched for b in stats.boards)
     out(
