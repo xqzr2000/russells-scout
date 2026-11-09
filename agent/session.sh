@@ -3,7 +3,7 @@
 # by hand or (from task 3.4) by a timer.
 #
 #   agent/session.sh                 start only if there's work: an open task, or a source
-#                                    needing attention ("repair"); otherwise skip, zero tokens
+#                                    that needs repair (below); otherwise skip, zero tokens
 #   agent/session.sh --task 0000     run this task now (no gate)
 #   agent/session.sh --force         run even if there's nothing to do
 #   agent/session.sh --dry-run       gate and briefing only; no session
@@ -172,12 +172,34 @@ fi
   FROM postings WHERE status = 'active'
   GROUP BY 1, 2 ORDER BY 4 DESC, 1, 2" 2>>"$LOGS/status.err" | brief_write boards.csv
 
-# "== sources needing attention: none" when all is well; anything else is work for the agent.
-attention=0
-if ((status_ok)) && grep -q '^== sources needing attention' "$BRIEF/status.txt" \
-   && ! grep -q '^== sources needing attention: none' "$BRIEF/status.txt"; then
-  attention=1
+# Sources that need a repair session. `scout status` lists every source with a failure,
+# which is right for a person, but one network blip isn't worth a paid session. Lines look
+# like "  name: status, N failure(s) in a row, last outcome[: error]". Repair when:
+#   the last outcome was structural (the format changed), or
+#   N >= 3 (it keeps failing), or the status is degraded.
+# Never for restricted or disabled sources: the rules say to leave a blocked site alone.
+repair=()
+if ((status_ok)); then
+  mapfile -t repair < <(python3 -I - "$BRIEF/status.txt" <<'PY'
+import re, sys
+line_re = re.compile(r"^  (\S+): (\w+), (\d+) failure\(s\) in a row, last (\w+)")
+inside = False
+for line in open(sys.argv[1], errors="replace"):
+    if line.startswith("== "):
+        inside = line.startswith("== sources needing attention")
+        continue
+    m = line_re.match(line) if inside else None
+    if not m:
+        continue
+    name, status, fails, outcome = m[1], m[2], int(m[3]), m[4]
+    if status in ("restricted", "disabled"):
+        continue
+    if outcome == "structural" or fails >= 3 or status == "degraded":
+        print(name)
+PY
+  )
 fi
+attention=$(( ${#repair[@]} > 0 ))
 
 # ---------------------------------------------------------------- gate
 mapfile -t open < <(open_tasks)
@@ -193,13 +215,13 @@ case $mode in
     if ((${#open[@]})); then
       task=${open[0]}; why="open task $task"
     elif ((attention)); then
-      task=repair; why="a source needs attention"
+      task=repair; why="a source needs repair: ${repair[*]}"
     else
       why="nothing to do"
     fi ;;
 esac
 ((status_ok)) || why="$why (scout status failed: see $LOGS/status.err)"
-echo "session: $why; open tasks: ${open[*]:-none}; sources needing attention: $([[ $attention == 1 ]] && echo yes || echo no)"
+echo "session: $why; open tasks: ${open[*]:-none}; sources needing repair: ${repair[*]:-none}"
 
 if [[ $mode == dry ]]; then
   echo "session: dry run; briefing written to $BRIEF"
@@ -234,6 +256,7 @@ turn_limit: $TURNS
 wrap_up_by_turn: $WRAP_UP
 time_limit_minutes: $((TIMEOUT / 60))
 why: $why
+repair_sources: ${repair[*]:-none}
 previous_session: ${previous:-none}
 EOF
 
