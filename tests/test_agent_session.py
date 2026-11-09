@@ -211,6 +211,15 @@ def box(tmp_path):
     tasks.mkdir()
     bin_ = tmp_path / "bin"
     bin_.mkdir()
+    # The stand-in docker must be executable. In the agent's container /tmp is a noexec
+    # tmpfs (Docker's default), so these tests skip there; Claude runs them in review.
+    probe = bin_ / "probe"
+    probe.write_text("#!/bin/sh\nexit 0\n")
+    probe.chmod(0o755)
+    try:
+        subprocess.run([str(probe)], check=True)
+    except (PermissionError, subprocess.CalledProcessError):
+        pytest.skip("can't run scripts from the temp folder (noexec /tmp)")
     calls = tmp_path / "docker-calls.log"
     docker = bin_ / "docker"
     docker.write_text(
