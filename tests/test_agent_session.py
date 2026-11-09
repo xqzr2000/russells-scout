@@ -132,11 +132,15 @@ def test_after_bundles_agent_branches_and_notes(tmp_path, main_repo):
     git(repo, "commit", "-q", "-m", "orientation notes")
     git(repo, "branch", "scratch-branch")  # not agent/*: stays out of the bundle
     (ws / "notes" / "handoff.md").write_text("rules: scout-rules-1\n")
+    (ws / ".scout-logs").mkdir()
+    (ws / ".scout-logs" / "guard.log").write_text("".join(f'{{"n":{i}}}\n' for i in range(250)))
 
     r = step(ws, main_repo, "after")
     assert r.returncode == 0, r.stderr
     out = tmp_path / "agent-outbox"
     assert (out / "notes" / "handoff.md").read_text() == "rules: scout-rules-1\n"
+    guard = (out / "guard.log").read_text().splitlines()
+    assert len(guard) == 200 and guard[-1] == '{"n":249}'  # the last 200 blocks
     manifest = (out / "manifest.txt").read_text()
     assert "branch=agent/0000-orientation" in manifest and "orientation notes" in manifest
     heads = git(tmp_path, "bundle", "list-heads", str(out / "agent.bundle"))

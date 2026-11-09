@@ -14,6 +14,7 @@
 #   agent.bundle   every agent/* branch (git bundle; `git fetch agent.bundle` reads it)
 #   manifest.txt   when, and each branch with its head commit
 #   notes/*.md     copies of /workspace/notes/*.md (regular files under 256 KB only)
+#   guard.log      the last 200 guard-hook blocks (for the digest)
 
 set -uo pipefail
 
@@ -82,6 +83,11 @@ after() {
     (($(stat -c %s "$f") <= MAX_NOTE)) || continue
     cp -- "$f" "$new/notes/"
   done
+
+  local glog=$WS/.scout-logs/guard.log
+  if [[ -f $glog && ! -L $glog ]]; then
+    tail -n 200 -- "$glog" >"$new/guard.log"
+  fi
 
   # Replace the outbox's contents (the folder itself is a mount point and stays).
   # rm acts on symlinks themselves, never their targets.
