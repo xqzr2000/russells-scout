@@ -179,9 +179,9 @@ days, and new branches to review go under "Needs your attention":
 |---|---|---|---|
 | 3.1 | Claude | **Done** (2026-11-07: PR #19; orientation session 23 turns, 58 s). **Workspace and rules:** locked `CLAUDE.md`; mounts (`/src/main`, `/briefing`); `agent/session.sh` (lock, gate, briefing, after-step); `agent/tasks/` with task 0000 (orientation) | a session you start by hand reads the repo and the briefing, writes `handoff.md` and commits it on `agent/0000-orientation`; the smoke test passes with the new mounts; the session shows the locked `CLAUDE.md` was loaded |
 | 3.2 | Claude | **Done** (2026-11-07: PR #20; the orientation branch came through the bundle and was reviewed as PR #21, then closed). **Getting work out:** `/srv/scout/agent-outbox`, written only by the after-step; the sync key also reads it (`agent/` folder, read-only); the WSL2 pull fetches it | task 0000's branch reaches GitHub as a PR from the bundle you attach (closed after review, since it's only notes) |
-| 3.3 | Agent | **Built by the agent** (2 sessions, 2026-11-07; reviewed in PR #24 with two fixes). Task file [0001](../agent/tasks/0001-workday.md). **Workday adapter** (task 0001): Workday boards → `BoardPosting`, in enrichment next to Ashby, Greenhouse and Lever. Sessions started by hand until it's done | PR merged; on the box `scout enrich --dry-run --board workday:<tenant/site>` reads real boards, and the next timed run adds details to Workday postings |
-| 3.4 | Claude | **Built** (PR #25). **Timer and digest:** `scout-agent.timer` at 10:20; the digest's Agent section (§4) | the timer skips on a quiet day with zero tokens; the digest shows the last session |
-| 3.5 | Agent | **Second source and a repair drill:** one big career site from `boards.csv` (task 0002); then task 0003, a source's parser against a changed synthetic fixture, so its tests fail | both PRs merged; the drill fixed by a timer-started session without editing the tests |
+| 3.3 | Agent | **Done.** Built by the agent (2 sessions, 2026-11-07; reviewed in PR #24 with two fixes). First timed run on 2026-11-08: 41 boards read (17 of them Workday), and 39 of 43 WorkBC Workday postings got descriptions. Task file [0001](../agent/tasks/0001-workday.md). **Workday adapter** (task 0001): Workday boards → `BoardPosting`, in enrichment next to Ashby, Greenhouse and Lever. Sessions started by hand until it's done | PR merged; on the box `scout enrich --dry-run --board workday:<tenant/site>` reads real boards, and the next timed run adds details to Workday postings |
+| 3.4 | Claude | **Done** (PR #25; installed 2026-11-08, and a test run skipped with zero tokens). **Timer and digest:** `scout-agent.timer` at 10:20; the digest's Agent section (§4) | the timer skips on a quiet day with zero tokens; the digest shows the last session |
+| 3.5 | Agent | **A real repair, then a second source.** Task [0002](../agent/tasks/0002-workday-bad-items.md): one malformed Workday item made Accenture's whole board fail on 2026-11-08 06:41. This real failure replaces the planned synthetic drill. Task [0003](../agent/tasks/0003-amazon.md): Amazon's career site (14 postings, the largest unread site). Both are left open for the 10:20 timer | both PRs merged; 0002 fixed by a timer-started session without editing existing tests |
 | 3.6 | — | **A week on the timer** and `docs/phase3-results.md` | §6 |
 
 Each task is one PR, as in Phases 1 and 2. Agent tasks are PRs of the agent's branch, plus a small
@@ -191,9 +191,11 @@ PR from Claude that marks the task done.
 
 1. **Workday:** the agent-built adapter is merged. Targets: at least 90% of known Workday boards
    answer, and at least 80% of WorkBC postings that link to Workday get a description.
+   *Met on 2026-11-08:* 17 of 17 boards answered (16 in the 06:41 run, because one bad item
+   failed Accenture; that's task 0002), and 39 of 43 postings (91%) got a description.
 2. **Second source:** an agent-built career-site source is merged and runs on the timers.
-3. **Repair:** the drill (task 0003) is fixed by a timer-started session, with the tests
-   unchanged, within the limits.
+3. **Repair:** a real source failure (task 0002, the malformed Workday item) is fixed by a
+   timer-started session, with existing tests unchanged, within the limits.
 4. **A week on the timer:** each day either skipped with nothing to do or ran a session that
    ended within its limits; no timeouts; every guard block explained.
 5. **Cost:** DeepSeek console spend for the phase recorded; the projected month is under $10
