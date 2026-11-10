@@ -353,12 +353,18 @@ class AmazonGet:
     """Serves the jobs of one fixture sliced by offset/result_limit; records each URL."""
 
     def __init__(self, data: bytes):
-        self.data = json.loads(data)
+        self.raw = data
+        try:
+            self.data = json.loads(data)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self.data = None
         self.urls: list[str] = []
 
     def __call__(self, url: str) -> bytes:
         self.urls.append(url)
         query = parse_qs(urlparse(url).query)
+        if not isinstance(self.data, dict) or not isinstance(self.data.get("jobs"), list):
+            return self.raw  # malformed or wrong shape: serve it untouched
         offset = int(query["offset"][0])
         limit = int(query["result_limit"][0])
         page = dict(self.data)
