@@ -1,0 +1,55 @@
+{
+  "error": null,
+  "hits": 4,
+  "facets": {},
+  "jobs": [
+    {
+      "id": "aaaaaaaa-1111-2222-3333-444444444444",
+      "id_icims": "10000001",
+      "job_path": "/en/jobs/10000001/fabrikam-data-scientist",
+      "title": "Data Scientist, Fabrikam Analytics",
+      "location": "CA, BC, Vancouver",
+      "normalized_location": "Vancouver, British Columbia, CAN",
+      "country_code": "CAN",
+      "description": "Build models for the Fabrikam team.<br/>Use SQL and Python every day.",
+      "posted_date": "November  9, 2026",
+      "job_schedule_type": "full-time"
+    },
+    {
+      "id": "aaaaaaaa-1111-2222-3333-555555555555",
+      "id_icims": "10000002",
+      "job_path": "/en/jobs/10000002/fabrikam-machine-learning-engineer",
+      "title": "Machine Learning Engineer",
+      "location": "CA, BC, Vancouver",
+      "normalized_location": "Vancouver, British Columbia, CAN",
+      "country_code": "CAN",
+      "description": "Train ranking models.",
+      "posted_date": "October 21, 2026",
+      "job_schedule_type": "full-time"
+    },
+    {
+      "id": "aaaaaaaa-1111-2222-3333-666666666666",
+      "id_icims": "10000003",
+      "job_path": "/en/jobs/10000003/fabrikam-data-analyst",
+      "title": "Data Analyst",
+      "location": "CA, BC, Victoria",
+      "normalized_location": "Victoria, British Columbia, CAN",
+      "country_code": "CAN",
+      "description": "Report on operations.",
+      "posted_date": "October 2, 2026",
+      "job_schedule_type": "full-time"
+    },
+    {
+      "id": "aaaaaaaa-1111-2222-3333-777777777777",
+      "id_icims": "10000004",
+      "job_path": "/en/jobs/10000004/fabrikam-remote-data-engineer",
+      "title": "Remote Data Engineer",
+      "location": "US, Virtual",
+      "normalized_location": "USA",
+      "country_code": "USA",
+      "description": "Build data pipelines.",
+      "posted_date": "September 30, 2026",
+      "job_schedule_type": "full-time"
+    }
+  ]
+}

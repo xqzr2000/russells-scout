@@ -302,6 +302,36 @@ def test_enrichment_passes_workday_host(conn, monkeypatch):
 
 
 @needs_db
+def test_amazon_end_to_end_from_a_workbc_link(conn):
+    """A WorkBC posting linking to amazon.jobs is classified by links.py, matched on the
+    Amazon search (one page per configured term) and gets its description, and the same job
+    isn't saved a second time as board-only."""
+    sweep_save(conn, WORKBC + [
+        wjob(9, "Data Scientist, Fabrikam Analytics", "Amazon",
+             "https://www.amazon.jobs/en/jobs/10000001"),
+    ])  # fmt: skip
+    assert one(conn, "SELECT ats, ats_board, ats_posting_id FROM postings"
+               " WHERE workbc_job_id = 'w9'") == ("amazon", "amazon", "10000001")  # fmt: skip
+    search = (FIX / "amazon_search.json").read_bytes()
+    base = boards()
+    urls = []
+
+    def get(url):
+        if url.startswith("https://www.amazon.jobs/en/search.json?"):
+            urls.append(url)
+            return search
+        return base(url)
+
+    run(conn, get=get)
+    assert len(urls) == len(CFG.terms)  # one page per configured term
+    desc, workplace = one(conn, "SELECT description, ats_workplace FROM postings"
+                          " WHERE workbc_job_id = 'w9'")  # fmt: skip
+    assert desc and workplace == "unknown"
+    assert one(conn, "SELECT count(*) FROM postings WHERE ats = 'amazon'"
+               " AND ats_posting_id = '10000001'") == (1,)  # fmt: skip
+
+
+@needs_db
 def test_workday_host_ignores_a_non_workday_careers_host(conn):
     # Contoso's first link (so its careers_host) is a Lever page; its Workday posting's own
     # link must decide the Workday host.

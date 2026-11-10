@@ -1,4 +1,5 @@
-"""Public job-board APIs: Ashby, Greenhouse, Lever, Workday (docs/phase1-plan.md §3 step 7).
+"""Public job-board APIs: Ashby, Greenhouse, Lever, Workday, Amazon
+(docs/phase1-plan.md §3 step 7).
 
 One GET per board returns every open posting on it; nothing needs a key.
 
@@ -29,6 +30,19 @@ has no workplace or pay fields.
 Greenhouse links on a company's own site carry only `?gh_jid=<id>`. `find_greenhouse_board`
 tries a few board names made from the employer's name and keeps the one where that exact
 job id exists, so a guess can't attach the wrong employer's board.
+
+Amazon has no board API either. Its career-site search calls an unofficial endpoint:
+
+  GET https://www.amazon.jobs/en/search.json?base_query={term}
+      &location[]=vancouvervictoria-canada&result_limit={n}&offset={m}&sort=recent
+
+`loc_query` is ignored by the endpoint; `location[]` is the filter that works. The search
+is run once per configured term with all pages. It returns the Vancouver/Victoria area (and
+a few postings that list Vancouver among their locations); Scout's own area check drops
+Victoria. The site's "Work from Home" filter (`location[]=virtual-locations`) returned no
+Canadian postings for Scout's terms, so remote jobs are deliberately not searched: there is
+no bounded way to get them. Each result has the job's description already, so no job page
+is fetched. Items with no title or numeric id are skipped and counted.
 """
 
 from __future__ import annotations
@@ -63,7 +77,12 @@ WORKDAY_HOST = re.compile(r"[a-z0-9-]+\.wd[0-9]+\.myworkdayjobs\.com")
 WORKDAY_HOST_SQL = r"^[a-z0-9-]+\.wd[0-9]+\.myworkdayjobs\.com$"
 WORKDAY = "https://{host}/wday/cxs/{tenant}/{site}/jobs"
 WORKDAY_JOB = "https://{host}/wday/cxs/{tenant}/{site}{path}"
-SUPPORTED = ("ashby", "greenhouse", "lever", "workday")
+AMAZON = (
+    "https://www.amazon.jobs/en/search.json?base_query={term}"
+    "&location%5B%5D=vancouvervictoria-canada&result_limit={limit}&offset={offset}&sort=recent"
+)
+AMAZON_PAGE_SIZE = 50
+SUPPORTED = ("ashby", "greenhouse", "lever", "workday", "amazon")
 
 Get = Callable[[str], bytes]
 Post = Callable[[str, bytes], bytes]
@@ -183,6 +202,65 @@ def _city(location: str | None) -> str | None:
         return None
     first = re.split(r"[,;(]|\s-\s", location)[0].strip()
     return first or None
+
+
+def _amazon_id(item: dict) -> str | None:
+    path = item.get("job_path")
+    if isinstance(path, str):
+        m = re.search(r"/jobs/(\d+)(?:/|$)", path)
+        if m:
+            return m.group(1)
+    icims = item.get("id_icims")
+    if isinstance(icims, str) and icims.isdigit():
+        return icims
+    if isinstance(icims, int) and not isinstance(icims, bool):
+        return str(icims)
+    return None
+
+
+def _amazon_date(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.strptime(" ".join(value.split()), "%B %d, %Y").strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _amazon_workplace(location: object, normalized: object) -> str:
+    text = f"{location or ''} {normalized or ''}".casefold()
+    return "remote" if re.search(r"\b(?:virtual|remote)\b", text) else "unknown"
+
+
+def parse_amazon_item(item: object) -> BoardPosting:
+    """One search result. Raises ValueError when it has no title or posting id."""
+    if not isinstance(item, dict):
+        raise ValueError("not an object")
+    title = item.get("title")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("no title")
+    posting_id = _amazon_id(item)
+    if not posting_id:
+        raise ValueError("no posting id")
+    path = item.get("job_path")
+    url = f"https://www.amazon.jobs{path}" if isinstance(path, str) and path else None
+    normalized = item.get("normalized_location")
+    location = normalized if isinstance(normalized, str) and normalized else item.get("location")
+    location = location if isinstance(location, str) else None
+    country = item.get("country_code")
+    return BoardPosting(
+        ats="amazon",
+        board="amazon",
+        posting_id=posting_id,
+        title=title.strip(),
+        url=url,
+        location=location,
+        city=_city(location),
+        country=country if isinstance(country, str) else None,
+        workplace=_amazon_workplace(item.get("location"), normalized),
+        description=text_from_html(item.get("description")),
+        published_at=_amazon_date(item.get("posted_date")),
+    )
 
 
 def parse_ashby(board: str, data: object) -> list[BoardPosting]:
@@ -457,6 +535,64 @@ def _outcome_for_status(status: int | None) -> str:
     return "structural"
 
 
+def _fetch_amazon(board: str, *, terms: Iterable[str], get: Get, sleep) -> BoardResult:
+    res = BoardResult("amazon", board)
+    terms = tuple(terms)
+    if not terms:
+        res.outcome, res.error = "structural", "amazon search needs terms"
+        return res
+    seen: dict[str, BoardPosting] = {}
+    for term in terms:
+        offset = 0
+        while True:
+            res.url = AMAZON.format(
+                term=quote(term, safe=""), limit=AMAZON_PAGE_SIZE, offset=offset
+            )
+            raw, error, status = _get_with_retries(res.url, get, sleep)
+            if raw is None:
+                res.outcome, res.error, res.postings = _outcome_for_status(status), error, []
+                return res
+            try:
+                data = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                res.outcome, res.error, res.postings = "structural", f"unexpected response: {e}", []
+                return res
+            total = data.get("hits") if isinstance(data, dict) else None
+            items = data.get("jobs") if isinstance(data, dict) else None
+            if (
+                not isinstance(data, dict)
+                or not isinstance(items, list)
+                or not isinstance(total, int)
+                or isinstance(total, bool)
+            ):
+                res.outcome = "structural"
+                res.error = "unexpected response: no jobs list or hits count"
+                res.postings = []
+                return res
+            usable = 0
+            for item in items:
+                try:
+                    bp = parse_amazon_item(item)
+                except ValueError:
+                    res.skipped += 1
+                    continue
+                usable += 1
+                seen.setdefault(bp.posting_id, bp)
+            if items and not usable:
+                res.outcome = "structural"
+                res.error = f"unexpected response: all {len(items)} postings on page are unusable"
+                res.postings = []
+                return res
+            offset += AMAZON_PAGE_SIZE
+            if len(items) < AMAZON_PAGE_SIZE or offset >= total:
+                break
+            sleep(1.0)
+        sleep(1.0)
+    res.postings = list(seen.values())
+    res.outcome, res.error = ("ok" if res.postings else "empty"), None
+    return res
+
+
 def _fetch_workday(
     board: str,
     *,
@@ -600,6 +736,8 @@ def fetch_board(
     """
     if ats not in SUPPORTED:
         return BoardResult(ats, board, "structural", error=f"unsupported ATS {ats!r}")
+    if ats == "amazon":
+        return _fetch_amazon(board, terms=terms, get=get, sleep=sleep)
     if ats == "workday":
         return _fetch_workday(
             board, host=host, terms=terms, metro=metro, keep_ids=set(keep_ids),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -341,3 +342,110 @@ def test_workday_city_ignores_country_and_region_parts():
     assert ats._workday_city("Toronto, Ontario, Canada", ()) == "Toronto"
     assert ats._workday_city("Canada, BC, Vancouver", ("Vancouver",)) == "Vancouver"
     assert ats._workday_city("Support Office Vancouver", ("Vancouver",)) == "Vancouver"
+
+
+AMAZON = (FIX / "amazon_search.json").read_bytes()
+AMAZON_ONE_BAD = (FIX / "amazon_search_one_bad.json").read_bytes()
+AMAZON_ALL_BAD = (FIX / "amazon_search_all_bad.json").read_bytes()
+
+
+class AmazonGet:
+    """Serves the jobs of one fixture sliced by offset/result_limit; records each URL."""
+
+    def __init__(self, data: bytes):
+        self.raw = data
+        try:
+            self.data = json.loads(data)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self.data = None
+        self.urls: list[str] = []
+
+    def __call__(self, url: str) -> bytes:
+        self.urls.append(url)
+        query = parse_qs(urlparse(url).query)
+        if not isinstance(self.data, dict) or not isinstance(self.data.get("jobs"), list):
+            return self.raw  # malformed or wrong shape: serve it untouched
+        offset = int(query["offset"][0])
+        limit = int(query["result_limit"][0])
+        page = dict(self.data)
+        page["jobs"] = self.data["jobs"][offset : offset + limit]
+        return json.dumps(page).encode()
+
+
+class AmazonErrorGet:
+    def __init__(self, error: Exception):
+        self.error = error
+        self.urls: list[str] = []
+
+    def __call__(self, url: str) -> bytes:
+        self.urls.append(url)
+        raise self.error
+
+
+def amz_fetch(get=None, terms=("data scientist",)):
+    get = get or AmazonGet(AMAZON)
+    res = ats.fetch_board("amazon", "amazon", terms=terms, get=get, sleep=lambda s: None)
+    return res, get
+
+
+def test_amazon_board():
+    res, get = amz_fetch()
+    assert res.outcome == "ok" and res.error is None and res.board == "amazon"
+    by_id = {p.posting_id: p for p in res.postings}
+    assert set(by_id) == {"10000001", "10000002", "10000003", "10000004"}
+    ds = by_id["10000001"]
+    assert ds.ats == "amazon" and ds.board == "amazon"
+    assert ds.title == "Data Scientist, Fabrikam Analytics"
+    assert ds.url == "https://www.amazon.jobs/en/jobs/10000001/fabrikam-data-scientist"
+    assert ds.location == "Vancouver, British Columbia, CAN"
+    assert (ds.city, ds.country, ds.workplace) == ("Vancouver", "CAN", "unknown")
+    assert ds.published_at == "2026-11-09"
+    assert "Build models" in ds.description and "<br" not in ds.description
+    assert by_id["10000004"].workplace == "remote"
+    assert by_id["10000003"].city == "Victoria"
+
+
+def test_amazon_paginates_to_a_fixed_end(monkeypatch):
+    monkeypatch.setattr(ats, "AMAZON_PAGE_SIZE", 2)  # fixture has 4 jobs: 2 pages
+    res, get = amz_fetch()
+    assert res.outcome == "ok" and len(res.postings) == 4
+    offsets = [parse_qs(urlparse(u).query)["offset"][0] for u in get.urls]
+    assert offsets == ["0", "2"]
+
+
+def test_amazon_uses_every_configured_term_and_dedups():
+    res, get = amz_fetch(terms=("data scientist", "machine learning"))
+    assert res.outcome == "ok" and len(res.postings) == 4  # same jobs, not eight
+    queries = [parse_qs(urlparse(u).query)["base_query"][0] for u in get.urls]
+    assert queries == ["data scientist", "machine learning"]
+    assert all("vancouvervictoria-canada" in u for u in get.urls)
+
+
+def test_amazon_skips_an_unusable_item_and_keeps_the_board():
+    res, _ = amz_fetch(AmazonGet(AMAZON_ONE_BAD))
+    assert res.outcome == "ok" and [p.posting_id for p in res.postings] == ["10000011"]
+    assert res.skipped == 1
+
+
+def test_amazon_a_page_with_no_usable_item_is_structural():
+    res, _ = amz_fetch(AmazonGet(AMAZON_ALL_BAD))
+    assert res.outcome == "structural" and "unusable" in res.error
+    assert res.postings == [] and res.skipped == 2
+
+
+def test_amazon_unexpected_response_is_structural():
+    res, _ = amz_fetch(AmazonGet(b"<html>"))
+    assert res.outcome == "structural" and "unexpected response" in res.error
+    res, _ = amz_fetch(AmazonGet(b'{"hits": 1}'))
+    assert res.outcome == "structural"
+
+
+@pytest.mark.parametrize(
+    ("error", "outcome"),
+    [(HttpError(401), "restricted"), (HttpError(403), "restricted"),
+     (HttpError(404), "structural"), (HttpError(500), "transient"),
+     (HttpError(429), "transient"), (TransportError("reset"), "transient")],
+)  # fmt: skip
+def test_amazon_failures_map_like_other_boards(error, outcome):
+    res, _ = amz_fetch(AmazonErrorGet(error))
+    assert res.outcome == outcome

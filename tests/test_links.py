@@ -71,6 +71,11 @@ from scout.pipeline.links import canonical_url, classify_link, normalize_employe
         ("https://careers.kula.ai/fabrikam/jobs/62748", "kula", "fabrikam", "62748"),
         ("https://jobs.gohire.io/northwind/data-analyst-123", "gohire", "northwind",
          "data-analyst-123"),
+        ("https://www.amazon.jobs/en/jobs/10460889", "amazon", "amazon", "10460889"),
+        (
+            "https://www.amazon.jobs/en/jobs/10460889/fabrikam-data-scientist",
+            "amazon", "amazon", "10460889",
+        ),
         ("https://jobs.example.com/job/ACCOUSR028031EXTERNAL/Data-Scientist", "custom", None,
          None),
         (None, "jobbank", None, None),
@@ -84,6 +89,15 @@ def test_classify_link(url, ats, board, posting_id):
 
 def test_host_drops_www():
     assert classify_link("https://www.amazon.example/jobs/1").host == "amazon.example"
+
+
+def test_amazon_canonical_url_is_unchanged():
+    url = "https://www.amazon.jobs/en/jobs/10460889/fabrikam-data-scientist?utm_source=x"
+    info = classify_link(url)
+    assert info.canonical_url == canonical_url(url)
+    assert info.canonical_url == (
+        "https://www.amazon.jobs/en/jobs/10460889/fabrikam-data-scientist"
+    )
 
 
 def test_canonical_url_drops_tracking_keeps_ids():

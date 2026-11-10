@@ -1,0 +1,28 @@
+{
+  "error": null,
+  "hits": 2,
+  "facets": {},
+  "jobs": [
+    {
+      "id": "bbbbbbbb-1111-2222-3333-444444444444",
+      "id_icims": "10000011",
+      "job_path": "/en/jobs/10000011/fabrikam-data-scientist",
+      "title": "Data Scientist",
+      "location": "CA, BC, Vancouver",
+      "normalized_location": "Vancouver, British Columbia, CAN",
+      "country_code": "CAN",
+      "description": "Do science.",
+      "posted_date": "November 1, 2026"
+    },
+    {
+      "id": "bbbbbbbb-1111-2222-3333-555555555555",
+      "id_icims": "10000012",
+      "job_path": null,
+      "title": "",
+      "location": "CA, BC, Vancouver",
+      "normalized_location": "Vancouver, British Columbia, CAN",
+      "country_code": "CAN",
+      "description": "Broken item."
+    }
+  ]
+}

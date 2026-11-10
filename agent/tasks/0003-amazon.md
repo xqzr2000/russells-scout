@@ -1,4 +1,4 @@
-status: open
+status: done
 branch: agent/0003-amazon
 
 # 0003: Amazon's career site in enrichment
