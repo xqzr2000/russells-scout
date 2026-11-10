@@ -288,6 +288,28 @@ def test_first_digest_covers_the_last_24_hours(data, tmp_path):
 
 
 @needs_db
+def test_a_job_seen_on_its_board_first_isnt_new_again_from_workbc(data, tmp_path):
+    # 2026-11-10: Workday jobs found on the company board at 16:49, then on WorkBC the next
+    # morning, were listed as new twice. Both postings share a duplicate group.
+    with db.connect("ingest", autocommit=True) as c:
+        board = add_posting(c, "Data Analyst 1", 30, jump="https://pfg.example/job/R-1")
+        workbc = add_posting(c, "Data Analyst 1", 1, jid="48999999")
+        c.execute("UPDATE postings SET dup_group_id = %s WHERE id IN (%s, %s)",
+                  (board, board, workbc))  # fmt: skip
+        # A group whose first posting is inside the window is still listed once.
+        a = add_posting(c, "Applied Scientist", 5, jump="https://board.example/7")
+        b = add_posting(c, "Applied Scientist", 4, jid="48999998")
+        c.execute("UPDATE postings SET dup_group_id = %s WHERE id IN (%s, %s)", (a, a, b))
+    with db.connect("reader") as c:
+        d = digest.gather(c, logs_dir=tmp_path)
+    titles = [j.title for j in d.sections[0].jobs]
+    assert "Data Analyst 1" not in titles
+    assert titles.count("Applied Scientist") == 1
+    assert d.sections[0].jobs[titles.index("Applied Scientist")].link == "https://board.example/7"
+    assert d.relevant_open == 3 + 2  # the fixture's 3, plus one per new group
+
+
+@needs_db
 def test_digest_is_written_recorded_and_the_next_starts_after_it(data, tmp_path):
     logs, out_dir = tmp_path / "logs", tmp_path / "digests"
     logs.mkdir()
