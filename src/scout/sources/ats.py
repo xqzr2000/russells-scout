@@ -535,9 +535,7 @@ def _outcome_for_status(status: int | None) -> str:
     return "structural"
 
 
-def _fetch_amazon(
-    board: str, *, terms: Iterable[str], get: Get, sleep
-) -> BoardResult:
+def _fetch_amazon(board: str, *, terms: Iterable[str], get: Get, sleep) -> BoardResult:
     res = BoardResult("amazon", board)
     terms = tuple(terms)
     if not terms:
