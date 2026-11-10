@@ -5,7 +5,7 @@ posting's jump link, and makes a canonical form of the link for duplicate checks
 `normalize_employer(name)` makes the key used to merge employer name variants.
 
 ATS values: ashby, greenhouse, lever, workday, smartrecruiters, workable, oracle, rippling,
-comeet, kula, gohire, custom (anything else), jobbank (no link).
+comeet, kula, gohire, amazon, custom (anything else), jobbank (no link).
 """
 
 from __future__ import annotations
@@ -116,6 +116,12 @@ def classify_link(url: str | None) -> LinkInfo:
     # GoHire: jobs.gohire.io/{board}/{slug}
     if host == "jobs.gohire.io":
         return info("gohire", seg[0] if seg else None, seg[-1] if len(seg) > 1 else None)
+
+    # Amazon: www.amazon.jobs/[{locale}/]jobs/{numeric id}[/{slug}]
+    if host == "amazon.jobs":
+        rest = seg[1:] if len(seg) > 1 and re.fullmatch(r"[a-z]{2}", seg[0]) else seg
+        if len(rest) > 1 and rest[0] == "jobs" and rest[1].isdigit():
+            return info("amazon", "amazon", rest[1])
 
     return info("custom")
 

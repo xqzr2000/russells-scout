@@ -1,0 +1,21 @@
+{
+  "error": null,
+  "hits": 2,
+  "facets": {},
+  "jobs": [
+    {
+      "id": "cccccccc-1111-2222-3333-444444444444",
+      "id_icims": null,
+      "job_path": null,
+      "title": "",
+      "location": "CA, BC, Vancouver"
+    },
+    {
+      "id": "cccccccc-1111-2222-3333-555555555555",
+      "id_icims": null,
+      "job_path": "/en/jobs/not-a-number/fabrikam",
+      "title": "Data Scientist Without Id",
+      "location": "CA, BC, Vancouver"
+    }
+  ]
+}
