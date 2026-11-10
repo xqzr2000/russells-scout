@@ -199,6 +199,14 @@ _JOB_COLUMNS = (
 )
 _FROM = " FROM postings p LEFT JOIN employers e ON e.id = p.employer_id"
 _IN_AREA = " p.area IN ('metro', 'remote')"
+# The same job can arrive twice: first from a company's job board (found_via 'ats'), then
+# from WorkBC a sweep or two later. Duplicate grouping (task 1.7) puts both in one
+# dup_group_id. A job counts as new only for its group's first-seen posting, and "open right
+# now" counts groups.
+_FIRST_OF_GROUP = (
+    " AND NOT EXISTS (SELECT 1 FROM postings q WHERE q.dup_group_id = p.dup_group_id"
+    " AND q.id <> p.id AND (q.first_seen_at, q.id) < (p.first_seen_at, p.id))"
+)
 
 
 def _job(row, note: str = "") -> Job:
@@ -448,11 +456,13 @@ def gather(
     sections = [
         section(
             NEW, "Metro Vancouver or remote, strong title match",
-            f"{active_in_area} AND p.match_quality = 'exact'{trusted}{window}", (frm, to),
+            f"{active_in_area} AND p.match_quality = 'exact'{trusted}{window}{_FIRST_OF_GROUP}",
+            (frm, to),
         ),
         section(
             POSSIBLE, "looser title match: worth a glance",
-            f"{active_in_area} AND p.match_quality = 'loose'{trusted}{window}", (frm, to),
+            f"{active_in_area} AND p.match_quality = 'loose'{trusted}{window}{_FIRST_OF_GROUP}",
+            (frm, to),
         ),
         section(
             CLOSED, "gone from WorkBC or the job board (missed 3 sweeps over 24 hours)",
@@ -467,7 +477,8 @@ def gather(
         ),
     ]  # fmt: skip
     relevant_open = one(
-        f"SELECT count(*){_FROM} WHERE {active_in_area} AND p.match_quality = 'exact'{trusted}"
+        f"SELECT count(DISTINCT COALESCE(p.dup_group_id, p.id)){_FROM}"
+        f" WHERE {active_in_area} AND p.match_quality = 'exact'{trusted}"
     )[0]
 
     health: list[str] = []
