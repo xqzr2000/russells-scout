@@ -12,7 +12,9 @@
 # so the agent can't put anything there itself. The WSL2 sync downloads it. It's rebuilt each
 # time and holds only regular files:
 #   agent.bundle   every agent/* branch (git bundle; `git fetch agent.bundle` reads it)
-#   manifest.txt   when, and each branch with its head commit
+#   manifest.txt   when; each branch with its head commit; and `pending=` for each branch that
+#                  waits for review: commits beyond origin/main, and its task (agent/NNNN-…)
+#                  not `status: done` on main. The digest lists only those.
 #   notes/*.md     copies of /workspace/notes/*.md (regular files under 256 KB only)
 #   guard.log      the last 200 guard-hook blocks (for the digest)
 
@@ -64,8 +66,21 @@ after() {
   {
     echo "time=$(date --iso-8601=seconds)"
     echo "origin_main=$(g -C "$REPO" rev-parse --short origin/main 2>/dev/null || echo none)"
+    local b name ahead id
     for b in "${branches[@]}"; do
       echo "branch=${b#refs/heads/} $(g -C "$REPO" log -1 --format='%h %cI %s' "$b")"
+    done
+    for b in "${branches[@]}"; do
+      name=${b#refs/heads/}
+      ahead=$(g -C "$REPO" rev-list --count "origin/main..$b" 2>/dev/null || echo 0)
+      ((ahead > 0)) || continue
+      if [[ $name =~ ^agent/([0-9]{4})- ]]; then
+        id=${BASH_REMATCH[1]}
+        if grep -qx 'status: done' "$MAIN"/agent/tasks/"$id"-*.md 2>/dev/null; then
+          continue
+        fi
+      fi
+      echo "pending=$name"
     done
   } >"$new/manifest.txt"
 

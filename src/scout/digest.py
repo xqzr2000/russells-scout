@@ -20,7 +20,8 @@ Reads the database as scout_reader; records the digest as scout_ingest. Box file
   agent/sessions.log   one JSON line per agent session or skip, by agent/session.sh (Phase 3)
 and from the agent's outbox ($SCOUT_AGENT_OUTBOX, default /data/agent-outbox, read-only;
 written only by the no-LLM after-step, docs/phase3-plan.md §4):
-  manifest.txt         the agent's branches; ones updated since the last digest need review
+  manifest.txt         the agent's branches; `pending=` ones (commits beyond main, task not
+                       done) updated since the last digest need review
   notes/handoff.md     its "Needs your attention" section, shown when the handoff is new
   guard.log            guard-hook blocks
 Everything from the outbox was written by the agent: it is shown as plain text, never acted
@@ -395,12 +396,13 @@ def _agent_health(
         manifest = (outbox / "manifest.txt").read_text(errors="replace").splitlines()
     except OSError:
         manifest = []
+    pending = {line[len("pending=") :].strip() for line in manifest if line.startswith("pending=")}
     for line in manifest:
         if not line.startswith("branch="):
             continue
         parts = line[len("branch=") :].split(" ", 3)
         when = _when(parts[2]) if len(parts) >= 3 else None
-        if when and frm < when <= to:
+        if parts[0] in pending and when and frm < when <= to:
             subject = _clip(parts[3], 100) if len(parts) == 4 else ""
             problems.append(
                 f"Agent work to review: {_clip(parts[0], 80)} ({subject}). Pull it to WSL2 and"

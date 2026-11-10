@@ -172,6 +172,33 @@ def test_after_bundles_agent_branches_and_notes(tmp_path, main_repo):
 
 
 @needs_tools
+def test_after_marks_only_branches_waiting_for_review(tmp_path, main_repo):
+    tasks = main_repo / "agent" / "tasks"
+    tasks.mkdir(parents=True)
+    (tasks / "0001-done.md").write_text("status: done\n")
+    (tasks / "0002-open.md").write_text("status: open\n")
+    git(main_repo, "add", ".")
+    git(main_repo, "commit", "-q", "-m", "tasks")
+    ws = tmp_path / "ws"
+    step(ws, main_repo, "before")
+    repo = ws / "repo"
+    for name, commit in [("agent/0001-done", True), ("agent/0002-open", True),
+                         ("agent/0003-empty", False), ("agent/misc", True)]:  # fmt: skip
+        git(repo, "checkout", "-q", "-b", name, "origin/main")
+        if commit:
+            (repo / f"{name.split('/')[1]}.txt").write_text("x\n")
+            git(repo, "add", ".")
+            git(repo, "commit", "-q", "-m", name)
+    assert step(ws, main_repo, "after").returncode == 0
+    lines = (tmp_path / "agent-outbox" / "manifest.txt").read_text().splitlines()
+    assert sum(line.startswith("branch=") for line in lines) == 4
+    # 0001: task done on main. 0003: nothing beyond main. No task id: still pending.
+    assert sorted(x for x in lines if x.startswith("pending=")) == [
+        "pending=agent/0002-open", "pending=agent/misc",
+    ]  # fmt: skip
+
+
+@needs_tools
 def test_after_needs_the_outbox_mount(tmp_path, main_repo):
     ws = tmp_path / "ws"
     step(ws, main_repo, "before")

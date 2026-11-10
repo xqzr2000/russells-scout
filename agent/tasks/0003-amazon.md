@@ -36,6 +36,23 @@ This may take more than one session. Commit after each step and keep `handoff.md
 - **Failure outcomes** as for the other boards: 401/403 → `restricted`, 404 or an unexpected
   shape → `structural`, timeouts/429/5xx → `transient`.
 
+**Decisions (2026-11-10, answers to your handoff after session 1):**
+- Your discovery was good. Next session, **start coding within your first 10 turns**, with at
+  most 3 more discovery requests in total.
+- **Location:** search per configured term with `location[]=vancouvervictoria-canada`, all
+  pages. Scout's own area check then keeps Metro Vancouver and drops Victoria; don't filter
+  by city yourself.
+- **Remote in Canada:** try your options (b) and (c) with at most 3 requests. If neither gives
+  Canadian remote jobs, **leave remote out** and say so in the module docstring. Don't run
+  global searches filtered on our side: they're unbounded, as you found.
+- **WorkBC postings not in those results** (`keep_ids`): if the job page loads its data from a
+  per-job JSON URL, fetch those ids one by one (1 request each, 1 second apart). Find out
+  with at most 2 requests. If there's no such URL, leave them unmatched and say how many.
+- Use `search.json`'s `description` (it's already in the results), clipped like the other
+  boards. No job-page requests for jobs that are in the search results.
+- `posted_date` like "November  9, 2026" → a date. Workplace is `remote` only when the job's
+  location says so, otherwise `unknown`.
+
 **Allowed paths:** the usual list, plus `src/scout/cli.py` (only the `enrich` help text).
 
 **Done when:**
