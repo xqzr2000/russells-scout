@@ -153,6 +153,8 @@ def test_agent_health_reads_the_outbox(tmp_path):
         "time=2026-11-08T17:30:00+00:00\norigin_main=24b1d28\n"
         "branch=agent/0001-workday 0cde13b 2026-11-08T04:54:02+00:00 Older work\n"
         "branch=agent/0002-amazon 1a2b3c4 2026-11-08T17:25:00+00:00 Read Amazon jobs\n"
+        "branch=agent/0003-merged 5d6e7f8 2026-11-08T17:20:00+00:00 Already reviewed\n"
+        "pending=agent/0002-amazon\n"
     )
     (out / "notes" / "handoff.md").write_text(
         "rules: scout-rules-2\n\n## Done\n\n- things\n\n## Needs your attention\n\n"
@@ -166,6 +168,7 @@ def test_agent_health_reads_the_outbox(tmp_path):
     assert "agent: the guard blocked 1 action(s) since the last digest" in health
     assert "agent asks: The <b>site</b> needs a new column: posting_type." in health
     assert "agent asks: Second point" in health
+    # Only pending branches (work beyond main, task not done) ask for review.
     assert len(problems) == 1 and "agent/0002-amazon (Read Amazon jobs)" in problems[0]
     assert "agent.bundle" in problems[0]
 
