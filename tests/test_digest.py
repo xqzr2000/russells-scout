@@ -179,6 +179,30 @@ def test_agent_health_reads_the_outbox(tmp_path):
     assert not any(h.startswith("agent asks") for h in health)
 
 
+def test_a_pending_branch_whose_task_is_done_isnt_listed(tmp_path):
+    # 2026-11-11: the manifest was packed while task 0003 was open; the task was closed on main
+    # later, so the digest must check the task itself.
+    logs = agent_logs(tmp_path, [{"time": "2026-11-08T10:21:00-0700", "outcome": "ran"}])
+    out = tmp_path / "outbox"
+    out.mkdir()
+    (out / "manifest.txt").write_text(
+        "branch=agent/0003-amazon 60094bd 2026-11-08T19:10:08+00:00 Amazon\n"
+        "branch=agent/0004-ea 1111111 2026-11-08T19:20:00+00:00 EA\n"
+        "pending=agent/0003-amazon\npending=agent/0004-ea\n"
+    )
+    tasks = tmp_path / "tasks"
+    tasks.mkdir()
+    (tasks / "0003-amazon.md").write_text("status: done\nbranch: agent/0003-amazon\n")
+    (tasks / "0004-ea.md").write_text("status: open\n")
+    health, problems = [], []
+    digest._agent_health(logs, out, AGENT_FROM, AGENT_TO, health, problems, tasks)
+    assert len(problems) == 1 and "agent/0004-ea" in problems[0]
+    # Without the tasks folder (not mounted), the manifest alone decides.
+    health, problems = [], []
+    digest._agent_health(logs, out, AGENT_FROM, AGENT_TO, health, problems)
+    assert len(problems) == 2
+
+
 def test_handoff_nothing_and_long_lines(tmp_path):
     f = tmp_path / "h.md"
     f.write_text("## Needs your attention\n\n- nothing\n")

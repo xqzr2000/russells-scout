@@ -186,10 +186,13 @@ services:
       SCOUT_DIGESTS_DIR: /data/digests
       SCOUT_DIGESTS_DIR_HOST: ${SCOUT_HOME:-/srv/scout}/logs/digests   # for messages only
       SCOUT_AGENT_OUTBOX: /data/agent-outbox
+      SCOUT_AGENT_TASKS: /data/agent-tasks
     volumes:
       - ${SCOUT_HOME:-/srv/scout}/logs:/data/logs:ro
       # The agent's outbox (Phase 3): its branches, notes and guard log, for the Agent lines.
       - ${SCOUT_HOME:-/srv/scout}/agent-outbox:/data/agent-outbox:ro
+      # Task status on main: a branch whose task is done needs no review (public files).
+      - ${SCOUT_HOME:-/srv/scout}/code/agent/tasks:/data/agent-tasks:ro
       # The only host folder it can write (uid 10002): the digest files.
       - ${SCOUT_HOME:-/srv/scout}/logs/digests:/data/digests
     networks: [data]

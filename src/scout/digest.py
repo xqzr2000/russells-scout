@@ -25,7 +25,9 @@ written only by the no-LLM after-step, docs/phase3-plan.md §4):
   notes/handoff.md     its "Needs your attention" section, shown when the handoff is new
   guard.log            guard-hook blocks
 Everything from the outbox was written by the agent: it is shown as plain text, never acted
-on, and clipped.
+on, and clipped. A pending branch whose task is `status: done` in the box's copy of main
+($SCOUT_AGENT_TASKS, default /data/agent-tasks: agent/tasks, read-only) is already reviewed:
+the manifest was packed before the task was closed.
 """
 
 from __future__ import annotations
@@ -340,9 +342,23 @@ def _handoff_asks(path: Path) -> list[str]:
     return [_clip(a) for a in asks[:5]]
 
 
+def _task_done(tasks: Path | None, branch: str) -> bool:
+    """agent/NNNN-… whose task file in main says `status: done`."""
+    m = re.match(r"agent/(\d{4})-", branch)
+    if not m or tasks is None:
+        return False
+    for f in tasks.glob(f"{m[1]}-*.md"):
+        try:
+            if "status: done" in f.read_text(errors="replace")[:4096].splitlines():
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _agent_health(
     logs: Path, outbox: Path, frm: datetime, to: datetime, health: list[str],
-    problems: list[str],
+    problems: list[str], tasks: Path | None = None,
 ) -> None:  # fmt: skip
     """Agent sessions since the last digest, and what the agent left for review."""
     sessions = _agent_sessions(logs)
@@ -410,7 +426,7 @@ def _agent_health(
             continue
         parts = line[len("branch=") :].split(" ", 3)
         when = _when(parts[2]) if len(parts) >= 3 else None
-        if parts[0] in pending and when and frm < when <= to:
+        if parts[0] in pending and when and frm < when <= to and not _task_done(tasks, parts[0]):
             subject = _clip(parts[3], 100) if len(parts) == 4 else ""
             problems.append(
                 f"Agent work to review: {_clip(parts[0], 80)} ({subject}). Pull it to WSL2 and"
@@ -424,6 +440,7 @@ def gather(
     tz = os.environ.get("SCOUT_TZ", "America/Vancouver")
     logs = logs_dir or Path(os.environ.get("SCOUT_LOGS_DIR", "/data/logs"))
     outbox = outbox_dir or Path(os.environ.get("SCOUT_AGENT_OUTBOX", "/data/agent-outbox"))
+    tasks = Path(os.environ.get("SCOUT_AGENT_TASKS", "/data/agent-tasks"))
 
     def one(sql, *params):
         return conn.execute(sql, params).fetchone()
@@ -528,7 +545,7 @@ def gather(
     _backup_health(logs, to, health, problems)
     _sync_health(logs, to, health, problems)
     _disk_health(logs, health, problems)
-    _agent_health(logs, outbox, frm, to, health, problems)
+    _agent_health(logs, outbox, frm, to, health, problems, tasks)
 
     return Digest(
         covers_from=frm, covers_to=to, day=day, stamp=stamp, since=since, first=first,
