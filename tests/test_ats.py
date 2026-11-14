@@ -298,6 +298,35 @@ def test_workday_unexpected_response_is_structural():
     assert res.outcome == "structural"
 
 
+class FlakyPost(FakePost):
+    """Returns the given non-JSON bodies first, then serves the usual search fixture."""
+
+    def __init__(self, bad: list[bytes], data: bytes = WD_SEARCH, details=None):
+        super().__init__(data, details or WD_JOB_URLS)
+        self.bad = list(bad)
+
+    def __call__(self, url: str, body: bytes) -> bytes:
+        if self.bad:
+            self.bodies.append(json.loads(body))
+            return self.bad.pop(0)
+        return super().__call__(url, body)
+
+
+def test_workday_retries_a_non_json_search_response():
+    # An outage page or empty body for one request must not lose the board.
+    post = FlakyPost([b"<html>maintenance</html>"])
+    res, post, _ = wd_fetch(post=post)
+    assert res.outcome == "ok" and len(res.postings) == 4
+    assert len(post.bodies) == 4  # one page each for 3 terms, plus the retried first request
+
+
+def test_workday_bounded_retries_then_structural():
+    post = FlakyPost([b""] * (ats.RETRIES + 1))
+    res, post, _ = wd_fetch(post=post, terms=("data scientist",))
+    assert res.outcome == "structural" and "unexpected response" in res.error
+    assert len(post.bodies) == ats.RETRIES + 1  # retried, then gave up (no page 2)
+
+
 def test_workday_needs_a_host_and_terms():
     res = ats.fetch_board("workday", WD_BOARD, sleep=lambda s: None)
     assert res.outcome == "structural" and "host" in res.error
