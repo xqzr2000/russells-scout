@@ -26,6 +26,8 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 DEFAULT_API = "https://workbc-jb.a55eb5-prod.stratus.cloud.gov.bc.ca/api/Search/JobSearch"
@@ -39,10 +41,27 @@ SORT_NEWEST_FIRST = 1
 
 
 class HttpError(Exception):
-    def __init__(self, status: int, body: bytes = b""):
+    def __init__(self, status: int, body: bytes = b"", retry_after: float | None = None):
         super().__init__(f"HTTP {status}")
         self.status = status
         self.body = body
+        self.retry_after = retry_after  # seconds from the Retry-After header, if given
+
+
+def retry_after_seconds(value: str | None) -> float | None:
+    """Parse a Retry-After header: delta-seconds or an HTTP date. None if absent/bad."""
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, (when - datetime.now(UTC)).total_seconds())
 
 
 class TransportError(Exception):
@@ -68,7 +87,7 @@ def http_post(url: str, body: dict) -> bytes:
         with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
             return resp.read()
     except urllib.error.HTTPError as e:
-        raise HttpError(e.code, e.read()[:2000]) from None
+        raise HttpError(e.code, e.read()[:2000], retry_after_seconds(e.headers.get("Retry-After"))) from None
     except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
         raise TransportError(str(getattr(e, "reason", e))) from None
 

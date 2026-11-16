@@ -59,11 +59,12 @@ from datetime import UTC, datetime
 from urllib.parse import quote, urlparse
 
 from scout.pipeline import classify
-from scout.sources.workbc import USER_AGENT, HttpError, TransportError
+from scout.sources.workbc import USER_AGENT, HttpError, TransportError, retry_after_seconds
 
 TIMEOUT_SECONDS = 30
 RETRIES = 2
 RETRY_WAIT = 5.0
+MAX_RETRY_AFTER = 60.0  # don't let one board's Retry-After stall the whole enrich run
 MAX_DESCRIPTION = 20_000
 WORKDAY_PAGE_SIZE = 20  # the API's maximum
 
@@ -93,7 +94,7 @@ def _open(req: urllib.request.Request) -> bytes:
         with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
             return resp.read()
     except urllib.error.HTTPError as e:
-        raise HttpError(e.code, e.read()[:2000]) from None
+        raise HttpError(e.code, e.read()[:2000], retry_after_seconds(e.headers.get("Retry-After"))) from None
     except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
         raise TransportError(str(getattr(e, "reason", e))) from None
 
@@ -694,16 +695,21 @@ def _retry(call: Callable[[], bytes], sleep) -> tuple[bytes | None, str | None, 
     """(body, error, http_status)"""
     error, status = None, None
     for attempt in range(RETRIES + 1):
+        wait = RETRY_WAIT * (attempt + 1)
         try:
             return call(), None, None
         except HttpError as e:
             status, error = e.status, f"HTTP {e.status}"
             if e.status not in (429,) and e.status < 500:
                 return None, error, status
+            if e.status == 429 and e.retry_after is not None:
+                # A throttling board names how long to wait; honour it (capped) instead of
+                # coming back too early and collecting another 429.
+                wait = min(max(wait, e.retry_after), MAX_RETRY_AFTER)
         except TransportError as e:
             status, error = None, str(e)
         if attempt < RETRIES:
-            sleep(RETRY_WAIT * (attempt + 1))
+            sleep(wait)
     return None, error, status
 
 
