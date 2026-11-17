@@ -61,6 +61,10 @@ def retry_after_seconds(value: str | None) -> float | None:
         when = parsedate_to_datetime(value)
     except (TypeError, ValueError):
         return None
+    if when is None:
+        return None
+    if when.tzinfo is None:  # obsolete RFC 850 dates carry no timezone
+        when = when.replace(tzinfo=UTC)
     return max(0.0, (when - datetime.now(UTC)).total_seconds())
 
 

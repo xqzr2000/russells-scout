@@ -449,3 +449,73 @@ def test_amazon_unexpected_response_is_structural():
 def test_amazon_failures_map_like_other_boards(error, outcome):
     res, _ = amz_fetch(AmazonErrorGet(error))
     assert res.outcome == outcome
+
+
+# ------------------------------------------------------------- Retry-After and 429s
+
+
+def test_retry_honours_retry_after_on_429():
+    calls = [HttpError(429, b"", 7.0), WD_SEARCH]
+    sleeps = []
+
+    def call():
+        item = calls.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    body, error, status = ats._retry(call, sleeps.append)
+    assert (body, error, status) == (WD_SEARCH, None, None)
+    assert sleeps == [7.0]
+
+
+def test_retry_caps_retry_after_and_keeps_plain_backoff():
+    def run(errors):
+        calls = [*errors, WD_SEARCH]
+        sleeps = []
+
+        def call():
+            item = calls.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        assert ats._retry(call, sleeps.append)[0] == WD_SEARCH
+        return sleeps
+
+    capped = run([HttpError(429, b"", 999.0), HttpError(429, b"", 999.0)])
+    assert capped == [ats.MAX_RETRY_AFTER, ats.MAX_RETRY_AFTER]
+    plain = run([HttpError(429), HttpError(429)])
+    assert plain == [ats.RETRY_WAIT, ats.RETRY_WAIT * 2]
+
+
+def test_workday_waits_retry_after_before_retrying_a_search():
+    post = FakePost(WD_SEARCH, WD_JOB_URLS, errors=[HttpError(429, b"", 7.0)])
+    sleeps: list[float] = []
+    res = ats.fetch_board(
+        "workday", WD_BOARD, host=WD_HOST, terms=("data scientist",),
+        metro=("Vancouver", "Burnaby"), get=wd_get(), post=post, sleep=sleeps.append,
+    )  # fmt: skip
+    assert res.outcome == "ok"
+    assert 7.0 in sleeps  # the board's Retry-After, not the default 5s
+
+
+def test_open_carries_retry_after(monkeypatch):
+    import email.message
+    import io
+    import urllib.error
+    import urllib.request
+
+    headers = email.message.Message()
+    headers["Retry-After"] = "12"
+
+    def fake_urlopen(req, timeout):
+        raise urllib.error.HTTPError(
+            "https://example.com/x", 429, "Too Many Requests", headers, io.BytesIO(b"throttled")
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(HttpError) as info:
+        ats._open(urllib.request.Request("https://example.com/x"))
+    assert info.value.status == 429 and info.value.retry_after == 12.0
+    assert info.value.body == b"throttled"
