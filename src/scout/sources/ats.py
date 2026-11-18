@@ -67,6 +67,10 @@ RETRY_WAIT = 5.0
 MAX_RETRY_AFTER = 60.0  # don't let one board's Retry-After stall the whole enrich run
 MAX_DESCRIPTION = 20_000
 WORKDAY_PAGE_SIZE = 20  # the API's maximum
+# cxs reports `total` capped at 2000, so a broad term on a large board would otherwise
+# page ~100 times per term (accenture: ~850 requests for the ten configured terms) and
+# get the whole run throttled. Results are relevance-ordered; 200 per term is plenty.
+WORKDAY_MAX_PAGES_PER_TERM = 10
 
 ASHBY = "https://api.ashbyhq.com/posting-api/job-board/{board}?includeCompensation=true"
 GREENHOUSE = "https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true"
@@ -486,6 +490,19 @@ def _workday_detail(info: dict, bp: BoardPosting, metro: Iterable[str]) -> Board
     )
 
 
+def _workday_path_location(path: str) -> str | None:
+    """Location from `externalPath` when the list item omits `locationsText`.
+
+    Workday paths put the location first: `/job/Vancouver-40-King-St-W/Posting_R1` or
+    `/job/British-Columbia---Vancouver/Posting_R1`. accenture returns no location text in
+    search results, so without this every posting looks locationless and none is kept.
+    """
+    parts = [p for p in path.split("/") if p]
+    if len(parts) >= 2 and parts[0] == "job":
+        return " ".join(parts[1].replace("-", " ").split())
+    return None
+
+
 def _workday_list_item(
     board: str, host: str, site: str, item: object, metro: Iterable[str], index: int
 ) -> tuple[BoardPosting, str]:
@@ -495,7 +512,7 @@ def _workday_list_item(
     posting_id = _workday_id(path)
     if not posting_id:
         raise ValueError(f"posting {index} has no posting id")
-    location = item.get("locationsText")
+    location = item.get("locationsText") or _workday_path_location(path)
     bp = BoardPosting(
         ats="workday",
         board=board,
@@ -624,7 +641,9 @@ def _fetch_workday(
     paths: dict[str, str] = {}
     for term in terms:
         offset = 0
+        pages = 0
         while True:
+            pages += 1
             body = json.dumps(
                 {"appliedFacets": {}, "limit": WORKDAY_PAGE_SIZE, "offset": offset,
                  "searchText": term}
@@ -665,8 +684,10 @@ def _fetch_workday(
                 return res
             offset += WORKDAY_PAGE_SIZE
             total = data.get("total")
-            if len(items) < WORKDAY_PAGE_SIZE or (
-                isinstance(total, int) and not isinstance(total, bool) and offset >= total
+            if (
+                len(items) < WORKDAY_PAGE_SIZE
+                or (isinstance(total, int) and not isinstance(total, bool) and offset >= total)
+                or pages >= WORKDAY_MAX_PAGES_PER_TERM
             ):
                 break
             sleep(1.0)
