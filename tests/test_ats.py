@@ -240,6 +240,51 @@ def test_workday_paginates_each_search_to_a_fixed_end(monkeypatch):
     assert all(b["searchText"] == "data scientist" for b in post.bodies)
 
 
+def test_workday_stops_paging_at_the_cap(monkeypatch):
+    """A board whose `total` is (wrongly) huge must not be paged forever."""
+    monkeypatch.setattr(ats, "WORKDAY_PAGE_SIZE", 2)
+    monkeypatch.setattr(ats, "WORKDAY_MAX_PAGES_PER_TERM", 3)
+    bodies: list[dict] = []
+
+    def post(url, body):
+        req = json.loads(body)
+        bodies.append(req)
+        items = [
+            {"title": "Data Scientist", "externalPath": f"/job/Vancouver-BC/Data-Scientist_R{n}"}
+            for n in (1, 2)
+        ]
+        return json.dumps({"total": 1000, "jobPostings": items}).encode()
+
+    res = ats.fetch_board(
+        "workday", WD_BOARD, host=WD_HOST, terms=("data scientist",),
+        metro=("Vancouver",), get=lambda url: WD_JOB_123, post=post, sleep=lambda s: None,
+    )  # fmt: skip
+    assert res.outcome == "ok"
+    assert [b["offset"] for b in bodies] == [0, 2, 4]  # three pages, then the cap
+
+
+def test_workday_location_from_external_path_when_list_omits_it(monkeypatch):
+    """accenture search items carry no `locationsText`; the path still names the city."""
+    item = {
+        "title": "Data Scientist",
+        "externalPath": "/job/Vancouver-BC/Data-Scientist_R999",
+        "postedOn": "Posted Today",
+        "bulletFields": ["R999"],
+    }
+
+    def post(url, body):
+        return json.dumps({"total": 1, "jobPostings": [item]}).encode()
+
+    res = ats.fetch_board(
+        "workday", WD_BOARD, host=WD_HOST, terms=("data scientist",),
+        metro=("Vancouver", "Burnaby"), get=lambda url: WD_JOB_123, post=post,
+        sleep=lambda s: None,
+    )  # fmt: skip
+    assert res.outcome == "ok"
+    assert [p.posting_id for p in res.postings] == ["R999"]
+    assert res.postings[0].city == "Vancouver"  # from the path, before the detail arrives
+
+
 def test_workday_uses_every_configured_term(monkeypatch):
     monkeypatch.setattr(ats, "WORKDAY_PAGE_SIZE", 2)  # fixture has 4 jobs: 2 pages per term
     terms = ("data scientist", "machine learning", "data engineer")
@@ -296,6 +341,35 @@ def test_workday_unexpected_response_is_structural():
     assert res.outcome == "structural" and "unexpected response" in res.error
     res, _, _ = wd_fetch(post=FakePost(b'{"total": 1}', {}))
     assert res.outcome == "structural"
+
+
+class FlakyPost(FakePost):
+    """Returns the given non-JSON bodies first, then serves the usual search fixture."""
+
+    def __init__(self, bad: list[bytes], data: bytes = WD_SEARCH, details=None):
+        super().__init__(data, details or WD_JOB_URLS)
+        self.bad = list(bad)
+
+    def __call__(self, url: str, body: bytes) -> bytes:
+        if self.bad:
+            self.bodies.append(json.loads(body))
+            return self.bad.pop(0)
+        return super().__call__(url, body)
+
+
+def test_workday_retries_a_non_json_search_response():
+    # An outage page or empty body for one request must not lose the board.
+    post = FlakyPost([b"<html>maintenance</html>"])
+    res, post, _ = wd_fetch(post=post)
+    assert res.outcome == "ok" and len(res.postings) == 4
+    assert len(post.bodies) == 4  # one page each for 3 terms, plus the retried first request
+
+
+def test_workday_bounded_retries_then_structural():
+    post = FlakyPost([b""] * (ats.RETRIES + 1))
+    res, post, _ = wd_fetch(post=post, terms=("data scientist",))
+    assert res.outcome == "structural" and "unexpected response" in res.error
+    assert len(post.bodies) == ats.RETRIES + 1  # retried, then gave up (no page 2)
 
 
 def test_workday_needs_a_host_and_terms():
@@ -449,3 +523,167 @@ def test_amazon_unexpected_response_is_structural():
 def test_amazon_failures_map_like_other_boards(error, outcome):
     res, _ = amz_fetch(AmazonErrorGet(error))
     assert res.outcome == outcome
+
+
+# ------------------------------------------------------------- Retry-After and 429s
+
+
+def test_retry_honours_retry_after_on_429():
+    calls = [HttpError(429, b"", 7.0), WD_SEARCH]
+    sleeps = []
+
+    def call():
+        item = calls.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    body, error, status = ats._retry(call, sleeps.append)
+    assert (body, error, status) == (WD_SEARCH, None, None)
+    assert sleeps == [7.0]
+
+
+def test_retry_caps_retry_after_and_keeps_plain_backoff():
+    def run(errors):
+        calls = [*errors, WD_SEARCH]
+        sleeps = []
+
+        def call():
+            item = calls.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        assert ats._retry(call, sleeps.append)[0] == WD_SEARCH
+        return sleeps
+
+    capped = run([HttpError(429, b"", 999.0), HttpError(429, b"", 999.0)])
+    assert capped == [ats.MAX_RETRY_AFTER, ats.MAX_RETRY_AFTER]
+    plain = run([HttpError(429), HttpError(429)])
+    assert plain == [ats.RETRY_WAIT, ats.RETRY_WAIT * 2]
+
+
+def test_workday_waits_retry_after_before_retrying_a_search():
+    post = FakePost(WD_SEARCH, WD_JOB_URLS, errors=[HttpError(429, b"", 7.0)])
+    sleeps: list[float] = []
+    res = ats.fetch_board(
+        "workday", WD_BOARD, host=WD_HOST, terms=("data scientist",),
+        metro=("Vancouver", "Burnaby"), get=wd_get(), post=post, sleep=sleeps.append,
+    )  # fmt: skip
+    assert res.outcome == "ok"
+    assert 7.0 in sleeps  # the board's Retry-After, not the default 5s
+
+
+def test_open_carries_retry_after(monkeypatch):
+    import email.message
+    import io
+    import urllib.error
+    import urllib.request
+
+    headers = email.message.Message()
+    headers["Retry-After"] = "12"
+
+    def fake_urlopen(req, timeout):
+        raise urllib.error.HTTPError(
+            "https://example.com/x", 429, "Too Many Requests", headers, io.BytesIO(b"throttled")
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(HttpError) as info:
+        ats._open(urllib.request.Request("https://example.com/x"))
+    assert info.value.status == 429 and info.value.retry_after == 12.0
+    assert info.value.body == b"throttled"
+
+
+# ------------------------------------------------------------- Workday: limit to Canada
+
+CANADA = "c4f78be1a8f14da0ab49ce1162348a5e"  # synthetic facet id
+COUNTRY_FACET = {
+    "facetParameter": "locationCountry",
+    "descriptor": "Country",
+    "values": [
+        {"descriptor": "United States of America", "id": "bc33aa3152ec42d4995f4791a106ed09",
+         "count": 1500},
+        {"descriptor": "Canada", "id": CANADA, "count": 39},
+    ],
+}  # fmt: skip
+LONDON_JOB = {
+    "title": "Data Scientist",
+    "externalPath": "/job/London/Data-Scientist_R900",
+    "locationsText": "London, United Kingdom",
+    "bulletFields": ["R900"],
+}
+
+
+class CountryPost:
+    """Worldwide searches (huge total, a London job, the country facet); Canada-only ones."""
+
+    def __init__(self, facets_for=lambda term: [COUNTRY_FACET]):
+        self.facets_for = facets_for
+        self.bodies: list[dict] = []
+
+    def __call__(self, url, body):
+        req = json.loads(body)
+        self.bodies.append(req)
+        if req["appliedFacets"]:
+            return WD_SEARCH  # the fixture's four Vancouver/Canada jobs
+        page = {
+            "total": 2000,
+            "jobPostings": [LONDON_JOB] * ats.WORKDAY_PAGE_SIZE,
+            "facets": self.facets_for(req["searchText"]),
+        }
+        return json.dumps(page).encode()
+
+
+def test_workday_limits_a_board_to_canada():
+    # 2026-11-14 to 11-19: accenture's worldwide searches (~850 requests a run) got every
+    # Workday board throttled. With the Canada facet it's one page per term.
+    post = CountryPost()
+    res, _, _ = wd_fetch(post=post, terms=("data scientist", "machine learning"))
+    assert res.outcome == "ok"
+    applied = [b["appliedFacets"] for b in post.bodies]
+    assert applied == [{}, {"locationCountry": [CANADA]}, {"locationCountry": [CANADA]}]
+    assert [b["searchText"] for b in post.bodies] == [
+        "data scientist", "data scientist", "machine learning",
+    ]  # fmt: skip
+    # Nothing is kept from the worldwide page.
+    assert sorted(p.posting_id for p in res.postings) == ["R123", "R124", "R125", "R126"]
+
+
+def test_workday_finds_a_country_facet_inside_a_group():
+    group = {"facetParameter": "locationMainGroup", "values": [
+        {"facetParameter": "locations", "descriptor": "Locations", "values": []},
+        COUNTRY_FACET,
+    ]}  # fmt: skip
+    assert ats._workday_country_facet([group]) == {"locationCountry": [CANADA]}
+
+
+def test_workday_looks_for_the_facet_on_each_term_until_found():
+    # Facets list only countries with hits for the term; Canada shows up for the second.
+    post = CountryPost(lambda term: [COUNTRY_FACET] if term == "machine learning" else [])
+    res, _, _ = wd_fetch(post=post, terms=("data scientist", "machine learning", "data engineer"))
+    assert res.outcome == "ok"
+    seen = [(b["searchText"], bool(b["appliedFacets"])) for b in post.bodies]
+    assert seen[-3:] == [
+        ("machine learning", False), ("machine learning", True), ("data engineer", True),
+    ]  # fmt: skip
+    # The first term ran worldwide, up to the page cap.
+    assert seen[: ats.WORKDAY_MAX_PAGES_PER_TERM] == [("data scientist", False)] * (
+        ats.WORKDAY_MAX_PAGES_PER_TERM
+    )
+
+
+@pytest.mark.parametrize(
+    "facets",
+    [
+        {},  # the fixture's shape: no facet list at all
+        [],
+        [{"facetParameter": "jobFamilyGroup", "values": [{"descriptor": "Canada", "id": "x"}]}],
+        [{**COUNTRY_FACET, "values": [{"descriptor": "France", "id": "f1"}]}],
+        [{**COUNTRY_FACET, "values": [{"descriptor": "Canada", "id": "bad id; drop"}]}],
+        [{**COUNTRY_FACET, "facetParameter": "location Country!"}],
+        "not a list",
+    ],
+)
+def test_workday_without_a_usable_canada_facet_searches_worldwide(facets):
+    assert ats._workday_country_facet(facets) is None

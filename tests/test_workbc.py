@@ -211,3 +211,46 @@ def test_fixture_page_parses_and_jump_urls():
         "https://jobs.ashbyhq.com/northwind/"
     )
     assert workbc.jump_url(jobs["50000001"]) is None  # Job Bank: no employer link
+
+
+def test_retry_after_seconds_reads_delta_and_dates():
+    from datetime import UTC, datetime, timedelta
+    from email.utils import format_datetime
+
+    assert workbc.retry_after_seconds("12") == 12.0
+    assert workbc.retry_after_seconds(" 0 ") == 0.0
+    assert workbc.retry_after_seconds("-5") == 0.0  # never a negative wait
+    assert workbc.retry_after_seconds(None) is None
+    assert workbc.retry_after_seconds("") is None
+    assert workbc.retry_after_seconds("soon") is None
+    future = format_datetime(datetime.now(UTC) + timedelta(seconds=45), usegmt=True)
+    assert 30 <= workbc.retry_after_seconds(future) <= 45
+    past = format_datetime(datetime.now(UTC) - timedelta(seconds=45), usegmt=True)
+    assert workbc.retry_after_seconds(past) == 0.0
+    # An asctime date has no timezone; it must not raise.
+    assert workbc.retry_after_seconds("06 Nov 94 08:49:37") == 0.0
+
+
+def test_http_post_carries_retry_after_on_429(monkeypatch):
+    import email.message
+    import io
+    import urllib.error
+    import urllib.request
+
+    headers = email.message.Message()
+    headers["Retry-After"] = "9"
+    calls = []
+
+    def fake_urlopen(req, timeout):
+        calls.append((req, timeout))
+        raise urllib.error.HTTPError(
+            "https://example.com/jobs", 429, "Too Many Requests", headers, io.BytesIO(b"slow down")
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(HttpError) as info:
+        workbc.http_post("https://example.com/jobs", {"Keyword": "analyst"})
+    assert info.value.status == 429
+    assert info.value.retry_after == 9.0
+    assert info.value.body == b"slow down"
+    assert len(calls) == 1

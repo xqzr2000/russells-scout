@@ -14,13 +14,20 @@ link, not the board name:
   search  POST https://{host}/wday/cxs/{tenant}/{site}/jobs
   details GET  https://{host}/wday/cxs/{tenant}/{site}{externalPath}
 
-The search is run once per configured term (all pages of each, 20 per page) so the result
-is the same set every run. Details are only fetched for postings Scout would keep: a WorkBC
+The search is run once per configured term (all pages of each, 20 per page, at most
+`WORKDAY_MAX_PAGES_PER_TERM`) so the result is the same set every run. When the board offers a
+country facet with Canada, searches are limited to Canada: the first term whose first page
+lists the facet starts again with it, and every later term uses it. A large employer's worldwide
+search otherwise runs to thousands of results (accenture: total 2000 for 8 of 10 terms,
+~850 requests a run) and gets every Workday board throttled with HTTP 429 (2026-11-14 to
+11-19). A board with no such facet is searched worldwide, up to the page cap. Details are only fetched for postings Scout would keep: a WorkBC
 posting on the board, or a title that matches a term in Metro Vancouver or remote.
 
 A search item with no title, `externalPath` or posting id is skipped and counted in
-`BoardResult.skipped`; the other items on the page still count. A response that is not
-JSON, has no `jobPostings` list, or whose page has no usable item at all is `structural`.
+`BoardResult.skipped`; the other items on the page still count. A response that has no
+`jobPostings` list is structural. A body that is not JSON (an HTML maintenance/outage page,
+or an empty body from a throttled request) is retried like a 5xx and is structural only if
+every attempt stays non-JSON.
 
 Each board is turned into a list of `BoardPosting` with the same fields whatever the ATS.
 Workplace comes from the ATS's own field (Ashby `workplaceType`, Lever `workplaceType`),
@@ -59,13 +66,20 @@ from datetime import UTC, datetime
 from urllib.parse import quote, urlparse
 
 from scout.pipeline import classify
-from scout.sources.workbc import USER_AGENT, HttpError, TransportError
+from scout.sources.workbc import USER_AGENT, HttpError, TransportError, retry_after_seconds
 
 TIMEOUT_SECONDS = 30
 RETRIES = 2
 RETRY_WAIT = 5.0
+MAX_RETRY_AFTER = 60.0  # don't let one board's Retry-After stall the whole enrich run
 MAX_DESCRIPTION = 20_000
 WORKDAY_PAGE_SIZE = 20  # the API's maximum
+# A backstop: the Canada facet (below) keeps searches small. Without it, cxs reports `total`
+# capped at 2000, so a broad term on a large board would page ~100 times (accenture: ~850
+# requests for the ten configured terms) and get the whole run throttled.
+WORKDAY_MAX_PAGES_PER_TERM = 10
+WORKDAY_COUNTRY = "Canada"
+_FACET_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 ASHBY = "https://api.ashbyhq.com/posting-api/job-board/{board}?includeCompensation=true"
 GREENHOUSE = "https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true"
@@ -93,7 +107,9 @@ def _open(req: urllib.request.Request) -> bytes:
         with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
             return resp.read()
     except urllib.error.HTTPError as e:
-        raise HttpError(e.code, e.read()[:2000]) from None
+        raise HttpError(
+            e.code, e.read()[:2000], retry_after_seconds(e.headers.get("Retry-After"))
+        ) from None
     except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
         raise TransportError(str(getattr(e, "reason", e))) from None
 
@@ -485,6 +501,45 @@ def _workday_detail(info: dict, bp: BoardPosting, metro: Iterable[str]) -> Board
     )
 
 
+def _workday_country_facet(facets: object, country: str = WORKDAY_COUNTRY) -> dict | None:
+    """`appliedFacets` limiting a search to one country, from a search response's `facets`.
+
+    The country facet is either top level (`{"facetParameter": "locationCountry", "values":
+    [{"descriptor": "Canada", "id": "…"}]}`) or inside a group such as `locationMainGroup`.
+    None if the board doesn't offer it, or lists no job in that country.
+    """
+    stack = list(facets) if isinstance(facets, list) else []
+    while stack:
+        facet = stack.pop(0)
+        if not isinstance(facet, dict) or not isinstance(facet.get("values"), list):
+            continue
+        param, values = facet.get("facetParameter"), facet["values"]
+        if isinstance(param, str) and "country" in param.casefold() and _FACET_ID.fullmatch(param):
+            for v in values:
+                if (
+                    isinstance(v, dict)
+                    and str(v.get("descriptor", "")).strip().casefold() == country.casefold()
+                    and isinstance(v.get("id"), str)
+                    and _FACET_ID.fullmatch(v["id"])
+                ):
+                    return {param: [v["id"]]}
+        stack.extend(v for v in values if isinstance(v, dict) and "facetParameter" in v)
+    return None
+
+
+def _workday_path_location(path: str) -> str | None:
+    """Location from `externalPath` when the list item omits `locationsText`.
+
+    Workday paths put the location first: `/job/Vancouver-40-King-St-W/Posting_R1` or
+    `/job/British-Columbia---Vancouver/Posting_R1`. accenture returns no location text in
+    search results, so without this every posting looks locationless and none is kept.
+    """
+    parts = [p for p in path.split("/") if p]
+    if len(parts) >= 2 and parts[0] == "job":
+        return " ".join(parts[1].replace("-", " ").split())
+    return None
+
+
 def _workday_list_item(
     board: str, host: str, site: str, item: object, metro: Iterable[str], index: int
 ) -> tuple[BoardPosting, str]:
@@ -494,7 +549,7 @@ def _workday_list_item(
     posting_id = _workday_id(path)
     if not posting_id:
         raise ValueError(f"posting {index} has no posting id")
-    location = item.get("locationsText")
+    location = item.get("locationsText") or _workday_path_location(path)
     bp = BoardPosting(
         ats="workday",
         board=board,
@@ -621,27 +676,39 @@ def _fetch_workday(
     res.url = search
     seen: dict[str, BoardPosting] = {}
     paths: dict[str, str] = {}
+    applied: dict = {}
     for term in terms:
         offset = 0
+        pages = 0
         while True:
+            pages += 1
             body = json.dumps(
-                {"appliedFacets": {}, "limit": WORKDAY_PAGE_SIZE, "offset": offset,
+                {"appliedFacets": applied, "limit": WORKDAY_PAGE_SIZE, "offset": offset,
                  "searchText": term}
             ).encode()  # fmt: skip
-            raw, error, status = _post_with_retries(search, body, post, sleep)
+            data, raw, error, status = _post_json_with_retries(search, body, post, sleep)
             if raw is None:
                 res.outcome, res.error, res.postings = _outcome_for_status(status), error, []
                 return res
-            try:
-                data = json.loads(raw)
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                res.outcome, res.error, res.postings = "structural", f"unexpected response: {e}", []
+            if data is None:
+                res.outcome, res.error, res.postings = "structural", error, []
                 return res
             if not isinstance(data, dict) or not isinstance(data.get("jobPostings"), list):
                 res.outcome = "structural"
                 res.error = "unexpected response: no jobPostings list"
                 res.postings = []
                 return res
+            if not applied and offset == 0:
+                # A first page tells whether the board can be limited to Canada. If so, this
+                # term starts again with the facet; nothing from this page is kept. Facets
+                # list only countries with hits for the term, so each term looks until one
+                # finds it.
+                country = _workday_country_facet(data.get("facets"))
+                if country:
+                    applied = country
+                    offset, pages = 0, 0
+                    sleep(1.0)
+                    continue
             items = data["jobPostings"]
             usable = 0
             for i, item in enumerate(items):
@@ -664,8 +731,10 @@ def _fetch_workday(
                 return res
             offset += WORKDAY_PAGE_SIZE
             total = data.get("total")
-            if len(items) < WORKDAY_PAGE_SIZE or (
-                isinstance(total, int) and not isinstance(total, bool) and offset >= total
+            if (
+                len(items) < WORKDAY_PAGE_SIZE
+                or (isinstance(total, int) and not isinstance(total, bool) and offset >= total)
+                or pages >= WORKDAY_MAX_PAGES_PER_TERM
             ):
                 break
             sleep(1.0)
@@ -694,16 +763,21 @@ def _retry(call: Callable[[], bytes], sleep) -> tuple[bytes | None, str | None, 
     """(body, error, http_status)"""
     error, status = None, None
     for attempt in range(RETRIES + 1):
+        wait = RETRY_WAIT * (attempt + 1)
         try:
             return call(), None, None
         except HttpError as e:
             status, error = e.status, f"HTTP {e.status}"
             if e.status not in (429,) and e.status < 500:
                 return None, error, status
+            if e.status == 429 and e.retry_after is not None:
+                # A throttling board names how long to wait; honour it (capped) instead of
+                # coming back too early and collecting another 429.
+                wait = min(max(wait, e.retry_after), MAX_RETRY_AFTER)
         except TransportError as e:
             status, error = None, str(e)
         if attempt < RETRIES:
-            sleep(RETRY_WAIT * (attempt + 1))
+            sleep(wait)
     return None, error, status
 
 
@@ -715,6 +789,30 @@ def _post_with_retries(
     url: str, body: bytes, post: Post, sleep
 ) -> tuple[bytes | None, str | None, int | None]:
     return _retry(lambda: post(url, body), sleep)
+
+
+def _post_json_with_retries(
+    url: str, body: bytes, post: Post, sleep
+) -> tuple[object | None, bytes | None, str | None, int | None]:
+    """POST and parse JSON, retrying a body that isn't JSON.
+
+    Workday answers a search with an HTML maintenance/outage page, or occasionally with an
+    empty body, while the tenant is down or a request is throttled. That is not a format
+    change, so retry it like a 5xx; only a body that stays non-JSON is structural.
+    Returns (parsed, body, error, http_status); parsed is None on failure.
+    """
+    raw, error, status = None, None, None
+    for attempt in range(RETRIES + 1):
+        raw, error, status = _post_with_retries(url, body, post, sleep)
+        if raw is None:
+            return None, raw, error, status
+        try:
+            return json.loads(raw), raw, None, None
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            error = f"unexpected response: {e}"
+        if attempt < RETRIES:
+            sleep(RETRY_WAIT * (attempt + 1))
+    return None, raw, error, status
 
 
 def fetch_board(
