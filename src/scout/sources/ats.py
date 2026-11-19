@@ -14,8 +14,13 @@ link, not the board name:
   search  POST https://{host}/wday/cxs/{tenant}/{site}/jobs
   details GET  https://{host}/wday/cxs/{tenant}/{site}{externalPath}
 
-The search is run once per configured term (all pages of each, 20 per page) so the result
-is the same set every run. Details are only fetched for postings Scout would keep: a WorkBC
+The search is run once per configured term (all pages of each, 20 per page, at most
+`WORKDAY_MAX_PAGES_PER_TERM`) so the result is the same set every run. When the board offers a
+country facet with Canada, searches are limited to Canada: the first term whose first page
+lists the facet starts again with it, and every later term uses it. A large employer's worldwide
+search otherwise runs to thousands of results (accenture: total 2000 for 8 of 10 terms,
+~850 requests a run) and gets every Workday board throttled with HTTP 429 (2026-11-14 to
+11-19). A board with no such facet is searched worldwide, up to the page cap. Details are only fetched for postings Scout would keep: a WorkBC
 posting on the board, or a title that matches a term in Metro Vancouver or remote.
 
 A search item with no title, `externalPath` or posting id is skipped and counted in
@@ -69,10 +74,12 @@ RETRY_WAIT = 5.0
 MAX_RETRY_AFTER = 60.0  # don't let one board's Retry-After stall the whole enrich run
 MAX_DESCRIPTION = 20_000
 WORKDAY_PAGE_SIZE = 20  # the API's maximum
-# cxs reports `total` capped at 2000, so a broad term on a large board would otherwise
-# page ~100 times per term (accenture: ~850 requests for the ten configured terms) and
-# get the whole run throttled. Results are relevance-ordered; 200 per term is plenty.
+# A backstop: the Canada facet (below) keeps searches small. Without it, cxs reports `total`
+# capped at 2000, so a broad term on a large board would page ~100 times (accenture: ~850
+# requests for the ten configured terms) and get the whole run throttled.
 WORKDAY_MAX_PAGES_PER_TERM = 10
+WORKDAY_COUNTRY = "Canada"
+_FACET_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 ASHBY = "https://api.ashbyhq.com/posting-api/job-board/{board}?includeCompensation=true"
 GREENHOUSE = "https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true"
@@ -494,6 +501,32 @@ def _workday_detail(info: dict, bp: BoardPosting, metro: Iterable[str]) -> Board
     )
 
 
+def _workday_country_facet(facets: object, country: str = WORKDAY_COUNTRY) -> dict | None:
+    """`appliedFacets` limiting a search to one country, from a search response's `facets`.
+
+    The country facet is either top level (`{"facetParameter": "locationCountry", "values":
+    [{"descriptor": "Canada", "id": "…"}]}`) or inside a group such as `locationMainGroup`.
+    None if the board doesn't offer it, or lists no job in that country.
+    """
+    stack = list(facets) if isinstance(facets, list) else []
+    while stack:
+        facet = stack.pop(0)
+        if not isinstance(facet, dict) or not isinstance(facet.get("values"), list):
+            continue
+        param, values = facet.get("facetParameter"), facet["values"]
+        if isinstance(param, str) and "country" in param.casefold() and _FACET_ID.fullmatch(param):
+            for v in values:
+                if (
+                    isinstance(v, dict)
+                    and str(v.get("descriptor", "")).strip().casefold() == country.casefold()
+                    and isinstance(v.get("id"), str)
+                    and _FACET_ID.fullmatch(v["id"])
+                ):
+                    return {param: [v["id"]]}
+        stack.extend(v for v in values if isinstance(v, dict) and "facetParameter" in v)
+    return None
+
+
 def _workday_path_location(path: str) -> str | None:
     """Location from `externalPath` when the list item omits `locationsText`.
 
@@ -643,13 +676,14 @@ def _fetch_workday(
     res.url = search
     seen: dict[str, BoardPosting] = {}
     paths: dict[str, str] = {}
+    applied: dict = {}
     for term in terms:
         offset = 0
         pages = 0
         while True:
             pages += 1
             body = json.dumps(
-                {"appliedFacets": {}, "limit": WORKDAY_PAGE_SIZE, "offset": offset,
+                {"appliedFacets": applied, "limit": WORKDAY_PAGE_SIZE, "offset": offset,
                  "searchText": term}
             ).encode()  # fmt: skip
             data, raw, error, status = _post_json_with_retries(search, body, post, sleep)
@@ -664,6 +698,17 @@ def _fetch_workday(
                 res.error = "unexpected response: no jobPostings list"
                 res.postings = []
                 return res
+            if not applied and offset == 0:
+                # A first page tells whether the board can be limited to Canada. If so, this
+                # term starts again with the facet; nothing from this page is kept. Facets
+                # list only countries with hits for the term, so each term looks until one
+                # finds it.
+                country = _workday_country_facet(data.get("facets"))
+                if country:
+                    applied = country
+                    offset, pages = 0, 0
+                    sleep(1.0)
+                    continue
             items = data["jobPostings"]
             usable = 0
             for i, item in enumerate(items):

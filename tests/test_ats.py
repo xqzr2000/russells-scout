@@ -593,3 +593,97 @@ def test_open_carries_retry_after(monkeypatch):
         ats._open(urllib.request.Request("https://example.com/x"))
     assert info.value.status == 429 and info.value.retry_after == 12.0
     assert info.value.body == b"throttled"
+
+
+# ------------------------------------------------------------- Workday: limit to Canada
+
+CANADA = "c4f78be1a8f14da0ab49ce1162348a5e"  # synthetic facet id
+COUNTRY_FACET = {
+    "facetParameter": "locationCountry",
+    "descriptor": "Country",
+    "values": [
+        {"descriptor": "United States of America", "id": "bc33aa3152ec42d4995f4791a106ed09",
+         "count": 1500},
+        {"descriptor": "Canada", "id": CANADA, "count": 39},
+    ],
+}  # fmt: skip
+LONDON_JOB = {
+    "title": "Data Scientist",
+    "externalPath": "/job/London/Data-Scientist_R900",
+    "locationsText": "London, United Kingdom",
+    "bulletFields": ["R900"],
+}
+
+
+class CountryPost:
+    """Worldwide searches (huge total, a London job, the country facet); Canada-only ones."""
+
+    def __init__(self, facets_for=lambda term: [COUNTRY_FACET]):
+        self.facets_for = facets_for
+        self.bodies: list[dict] = []
+
+    def __call__(self, url, body):
+        req = json.loads(body)
+        self.bodies.append(req)
+        if req["appliedFacets"]:
+            return WD_SEARCH  # the fixture's four Vancouver/Canada jobs
+        page = {
+            "total": 2000,
+            "jobPostings": [LONDON_JOB] * ats.WORKDAY_PAGE_SIZE,
+            "facets": self.facets_for(req["searchText"]),
+        }
+        return json.dumps(page).encode()
+
+
+def test_workday_limits_a_board_to_canada():
+    # 2026-11-14 to 11-19: accenture's worldwide searches (~850 requests a run) got every
+    # Workday board throttled. With the Canada facet it's one page per term.
+    post = CountryPost()
+    res, _, _ = wd_fetch(post=post, terms=("data scientist", "machine learning"))
+    assert res.outcome == "ok"
+    applied = [b["appliedFacets"] for b in post.bodies]
+    assert applied == [{}, {"locationCountry": [CANADA]}, {"locationCountry": [CANADA]}]
+    assert [b["searchText"] for b in post.bodies] == [
+        "data scientist", "data scientist", "machine learning",
+    ]  # fmt: skip
+    # Nothing is kept from the worldwide page.
+    assert sorted(p.posting_id for p in res.postings) == ["R123", "R124", "R125", "R126"]
+
+
+def test_workday_finds_a_country_facet_inside_a_group():
+    group = {"facetParameter": "locationMainGroup", "values": [
+        {"facetParameter": "locations", "descriptor": "Locations", "values": []},
+        COUNTRY_FACET,
+    ]}  # fmt: skip
+    assert ats._workday_country_facet([group]) == {"locationCountry": [CANADA]}
+
+
+def test_workday_looks_for_the_facet_on_each_term_until_found():
+    # Facets list only countries with hits for the term; Canada shows up for the second.
+    post = CountryPost(lambda term: [COUNTRY_FACET] if term == "machine learning" else [])
+    res, _, _ = wd_fetch(post=post, terms=("data scientist", "machine learning", "data engineer"))
+    assert res.outcome == "ok"
+    seen = [(b["searchText"], bool(b["appliedFacets"])) for b in post.bodies]
+    assert seen[-3:] == [
+        ("machine learning", False), ("machine learning", True), ("data engineer", True),
+    ]  # fmt: skip
+    # The first term ran worldwide, up to the page cap.
+    assert seen[: ats.WORKDAY_MAX_PAGES_PER_TERM] == [("data scientist", False)] * (
+        ats.WORKDAY_MAX_PAGES_PER_TERM
+    )
+
+
+@pytest.mark.parametrize(
+    "facets",
+    [
+        {},  # the fixture's shape: no facet list at all
+        [],
+        [{"facetParameter": "jobFamilyGroup", "values": [{"descriptor": "Canada", "id": "x"}]}],
+        [{**COUNTRY_FACET, "values": [{"descriptor": "France", "id": "f1"}]}],
+        [{**COUNTRY_FACET, "values": [{"descriptor": "Canada", "id": "bad id; drop"}]}],
+        [{**COUNTRY_FACET, "facetParameter": "location Country!"}],
+        "not a list",
+    ],
+)
+def test_workday_without_a_usable_canada_facet_searches_worldwide(facets):
+    assert ats._workday_country_facet(facets) is None
