@@ -356,6 +356,10 @@ def _task_done(tasks: Path | None, branch: str) -> bool:
     return False
 
 
+# How agent/session.sh words a skip while a repair branch waits for review.
+REPAIR_WAITS = "repair waits for review: "
+
+
 def _agent_health(
     logs: Path, outbox: Path, frm: datetime, to: datetime, health: list[str],
     problems: list[str], tasks: Path | None = None,
@@ -388,6 +392,17 @@ def _agent_health(
                 f" task {e.get('task')}): {_clip(e.get('detail', ''), 120)}."
                 " See /srv/scout/logs/agent/last-session.json and its transcript."
             )
+    # The gate holds back repairs while one waits for review: say so every day, not only on
+    # the day the branch was written.
+    waiting: set[str] = set()
+    detail = str(last.get("detail") or "")
+    if last.get("outcome") == "skipped" and detail.startswith(REPAIR_WAITS):
+        waiting = set(detail[len(REPAIR_WAITS) :].split())
+        problems.append(
+            f"Repair waiting for your review: {_clip(' '.join(sorted(waiting)), 120)}. No new"
+            " repair session starts until it's merged or closed. Pull it to WSL2 and attach"
+            " ~/scout-mirror/agent/agent.bundle in chat with Claude."
+        )
     if _hours_ago(last_w, to) > AGENT_MAX_HOURS:
         problems.append(
             f"No agent check for {_ago(_hours_ago(last_w, to)).removesuffix(' ago')}:"
@@ -426,6 +441,8 @@ def _agent_health(
             continue
         parts = line[len("branch=") :].split(" ", 3)
         when = _when(parts[2]) if len(parts) >= 3 else None
+        if parts[0] in waiting:
+            continue
         if parts[0] in pending and when and frm < when <= to and not _task_done(tasks, parts[0]):
             subject = _clip(parts[3], 100) if len(parts) == 4 else ""
             problems.append(

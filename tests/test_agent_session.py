@@ -268,7 +268,9 @@ def box(tmp_path):
         '  *"exec -T db psql"*) printf "ats,board,employer,postings,with_details,example_link\\n'
         'workday,fabrikam/careers,Fabrikam,3,0,https://fabrikam.wd3.myworkdayjobs.com/x\\n" ;;\n'
         '  *"workspace-step.sh before"*) echo "workspace: origin/main at abc1234" ;;\n'
-        '  *"workspace-step.sh after"*) echo "workspace: outbox has 1 branch(es)" ;;\n'
+        '  *"workspace-step.sh after"*)\n'
+        '    [[ -n ${FAKE_MANIFEST:-} ]] && cp "$FAKE_MANIFEST" "$SCOUT_HOME/agent-outbox/manifest.txt"\n'
+        '    echo "workspace: outbox has 1 branch(es)" ;;\n'
         '  *" claude -p "*)\n'
         '    if [[ "$*" == *"rules version"* ]]; then\n'
         '      echo \'{"type":"result","subtype":"success","is_error":false,"num_turns":1,'
@@ -458,11 +460,78 @@ def test_a_second_session_waits_for_the_first(box):
 
 
 @needs_tools
-def test_pack_runs_only_the_after_step(box):
+def test_pack_refreshes_main_then_packs(box):
+    # The before-step fetches main, so `pending=` is worked out against the current main.
     r = session(box, "--pack")
     assert r.returncode == 0, r.stderr
     agent = [c for c in calls(box) if "--profile agent" in c]
-    assert len(agent) == 1 and "workspace-step.sh after" in agent[0]
+    assert len(agent) == 2
+    assert "workspace-step.sh before" in agent[0] and "workspace-step.sh after" in agent[1]
+    assert not any(" claude -p " in c for c in calls(box))
+
+
+def manifest(*pending):
+    lines = ["time=2026-11-19T10:23:00-07:00", "origin_main=9871ee4"]
+    lines += [f"branch={b} abc1234 2026-11-19T10:22:00-07:00 Fix" for b in pending]
+    return "\n".join(lines + [f"pending={b}" for b in pending]) + "\n"
+
+
+@needs_tools
+def test_repair_waiting_for_review_skips_the_session(box):
+    box["status"].write_text(STATUS_BROKEN)
+    (box["home"] / "agent-outbox" / "manifest.txt").write_text(
+        manifest("agent/repair-workday-bdo", "agent/0004-ea")
+    )
+    r = session(box)
+    assert r.returncode == 0, r.stderr
+    assert "repair waits for review: agent/repair-workday-bdo;" in r.stdout
+    assert not any(" claude -p " in c for c in calls(box))
+    steps = [c for c in calls(box) if "workspace-step.sh" in c]
+    assert len(steps) == 2  # the refresh: before, then after
+    rec = last(box)
+    assert rec["outcome"] == "skipped" and rec["task"] is None
+    assert rec["detail"] == "repair waits for review: agent/repair-workday-bdo"
+
+
+@needs_tools
+def test_merged_repair_no_longer_blocks(box, tmp_path):
+    # The manifest from the last session still says pending; after the refresh it doesn't.
+    box["status"].write_text(STATUS_BROKEN)
+    (box["home"] / "agent-outbox" / "manifest.txt").write_text(manifest("agent/repair-x"))
+    fresh = tmp_path / "fresh-manifest.txt"
+    fresh.write_text(manifest())
+    r = session(box, FAKE_MANIFEST=str(fresh))
+    assert r.returncode == 0, r.stderr
+    assert any("Task: repair." in c for c in calls(box))
+    assert last(box)["task"] == "repair"
+
+
+@needs_tools
+@pytest.mark.parametrize(
+    "pending",
+    [
+        "agent/0004-ea",  # a task branch: its task gate handles it
+        "agent/repair x; rm -rf /",  # not a plain branch name: ignored
+    ],
+)
+def test_only_plain_repair_branches_block(box, pending):
+    box["status"].write_text(STATUS_BROKEN)
+    (box["home"] / "agent-outbox" / "manifest.txt").write_text(f"pending={pending}\n")
+    r = session(box)
+    assert r.returncode == 0, r.stderr
+    assert any("Task: repair." in c for c in calls(box))
+    # No refresh needed when nothing blocks: before, session, after.
+    agent = [c for c in calls(box) if "workspace-step.sh" in c]
+    assert len(agent) == 2
+
+
+@needs_tools
+def test_forced_repair_ignores_waiting_branches(box):
+    box["status"].write_text(STATUS_BROKEN)
+    (box["home"] / "agent-outbox" / "manifest.txt").write_text(manifest("agent/repair-x"))
+    r = session(box, "--force")
+    assert r.returncode == 0, r.stderr
+    assert any("Task: repair." in c for c in calls(box))
 
 
 @needs_tools

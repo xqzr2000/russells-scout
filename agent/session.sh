@@ -3,12 +3,13 @@
 # by hand or (from task 3.4) by a timer.
 #
 #   agent/session.sh                 start only if there's work: an open task, or a source
-#                                    that needs repair (below); otherwise skip, zero tokens
+#                                    that needs repair (below) and no repair branch waits for
+#                                    review; otherwise skip, zero tokens
 #   agent/session.sh --task 0000     run this task now (no gate)
 #   agent/session.sh --force         run even if there's nothing to do
 #   agent/session.sh --dry-run       gate and briefing only; no session
 #   agent/session.sh --check-rules   a 1-turn session: can the agent see its locked rules?
-#   agent/session.sh --pack          only the after-step: refresh agent-outbox (no LLM)
+#   agent/session.sh --pack          refresh agent-outbox against the current main (no LLM)
 #
 # Steps: lock -> gate -> briefing (logs/agent-briefing, mounted read-only at /briefing) ->
 # before-step in the container -> Claude Code session -> after-step in the container, the
@@ -42,7 +43,7 @@ case ${1:-} in
   --dry-run) mode=dry ;;
   --check-rules) mode=rules ;;
   --pack) mode=pack ;;
-  *) sed -n '2,18p' "$0"; exit 64 ;;
+  *) sed -n '2,19p' "$0"; exit 64 ;;
 esac
 
 mkdir -p "$BRIEF" "$LOGS" || exit 1
@@ -126,8 +127,17 @@ agent_step() {
     agent bash /src/main/agent/workspace-step.sh "$1"
 }
 
+# Repair branches that wait for review: `pending=` lines in the outbox manifest for branches
+# that aren't a numbered task (agent/NNNN-…). Only plain branch names are read.
+waiting_repairs() {
+  [[ -f $OUTBOX/manifest.txt && ! -L $OUTBOX/manifest.txt ]] || return 0
+  sed -n 's/^pending=//p' "$OUTBOX/manifest.txt" \
+    | grep -E '^agent/[A-Za-z0-9._/-]{1,80}$' | grep -Ev '^agent/[0-9]{4}-' || true
+}
+
+# --pack: the before-step first, so `pending=` is worked out against the current main.
 if [[ $mode == pack ]]; then
-  agent_step after
+  agent_step before && agent_step after
   exit
 fi
 
@@ -220,6 +230,19 @@ case $mode in
       why="nothing to do"
     fi ;;
 esac
+# A repair already waiting for review: another session would only redo it (11-14 to 11-19 ran
+# five on the Workday 429s). The manifest dates from the last session and main may have
+# moved since (the review merged), so refresh it first (no LLM).
+if [[ $mode == gate && $task == repair && $status_ok == 1 ]]; then
+  mapfile -t waiting < <(waiting_repairs)
+  if ((${#waiting[@]})); then
+    agent_step before && agent_step after
+    mapfile -t waiting < <(waiting_repairs)
+  fi
+  if ((${#waiting[@]})); then
+    task=""; why="repair waits for review: ${waiting[*]}"
+  fi
+fi
 ((status_ok)) || why="$why (scout status failed: see $LOGS/status.err)"
 echo "session: $why; open tasks: ${open[*]:-none}; sources needing repair: ${repair[*]:-none}"
 
