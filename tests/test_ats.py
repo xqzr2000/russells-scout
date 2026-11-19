@@ -240,6 +240,51 @@ def test_workday_paginates_each_search_to_a_fixed_end(monkeypatch):
     assert all(b["searchText"] == "data scientist" for b in post.bodies)
 
 
+def test_workday_stops_paging_at_the_cap(monkeypatch):
+    """A board whose `total` is (wrongly) huge must not be paged forever."""
+    monkeypatch.setattr(ats, "WORKDAY_PAGE_SIZE", 2)
+    monkeypatch.setattr(ats, "WORKDAY_MAX_PAGES_PER_TERM", 3)
+    bodies: list[dict] = []
+
+    def post(url, body):
+        req = json.loads(body)
+        bodies.append(req)
+        items = [
+            {"title": "Data Scientist", "externalPath": f"/job/Vancouver-BC/Data-Scientist_R{n}"}
+            for n in (1, 2)
+        ]
+        return json.dumps({"total": 1000, "jobPostings": items}).encode()
+
+    res = ats.fetch_board(
+        "workday", WD_BOARD, host=WD_HOST, terms=("data scientist",),
+        metro=("Vancouver",), get=lambda url: WD_JOB_123, post=post, sleep=lambda s: None,
+    )  # fmt: skip
+    assert res.outcome == "ok"
+    assert [b["offset"] for b in bodies] == [0, 2, 4]  # three pages, then the cap
+
+
+def test_workday_location_from_external_path_when_list_omits_it(monkeypatch):
+    """accenture search items carry no `locationsText`; the path still names the city."""
+    item = {
+        "title": "Data Scientist",
+        "externalPath": "/job/Vancouver-BC/Data-Scientist_R999",
+        "postedOn": "Posted Today",
+        "bulletFields": ["R999"],
+    }
+
+    def post(url, body):
+        return json.dumps({"total": 1, "jobPostings": [item]}).encode()
+
+    res = ats.fetch_board(
+        "workday", WD_BOARD, host=WD_HOST, terms=("data scientist",),
+        metro=("Vancouver", "Burnaby"), get=lambda url: WD_JOB_123, post=post,
+        sleep=lambda s: None,
+    )  # fmt: skip
+    assert res.outcome == "ok"
+    assert [p.posting_id for p in res.postings] == ["R999"]
+    assert res.postings[0].city == "Vancouver"  # from the path, before the detail arrives
+
+
 def test_workday_uses_every_configured_term(monkeypatch):
     monkeypatch.setattr(ats, "WORKDAY_PAGE_SIZE", 2)  # fixture has 4 jobs: 2 pages per term
     terms = ("data scientist", "machine learning", "data engineer")
