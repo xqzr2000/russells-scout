@@ -128,7 +128,12 @@ What `agent/session.sh` does on the host (as `shaw2012`, by timer or by hand):
    failure, 3 or more failures in a row, or status `degraded`. A single transient failure
    doesn't count, and neither does a `restricted` or `disabled` source. (Tightened on
    2026-11-09: until then any listed source counted, so one network blip could have started a
-   paid session.) Otherwise it records "skipped: nothing to
+   paid session.) A repair also waits while a repair branch (any pending `agent/…` branch
+   that isn't a numbered task) is waiting for review: the gate refreshes the outbox manifest
+   against the current main (no LLM), and if the branch is still pending it records "skipped:
+   repair waits for review" and the digest repeats that every day. (Added on 2026-11-19:
+   from 11-14 to 11-19 five repair sessions ran on the same Workday 429s while the first fix
+   waited.) Otherwise it records "skipped: nothing to
    do" and exits, with zero tokens. `--task <id>` runs one task by hand; `--force` skips the
    gate.
 3. **Briefing:** it writes `status.txt`, the latest digest, `boards.csv` and `session.txt` (the

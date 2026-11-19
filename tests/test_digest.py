@@ -203,6 +203,31 @@ def test_a_pending_branch_whose_task_is_done_isnt_listed(tmp_path):
     assert len(problems) == 2
 
 
+def test_a_repair_waiting_for_review_is_repeated_daily(tmp_path):
+    # The gate skips repairs while one waits; the branch itself is days old by then.
+    logs = agent_logs(tmp_path, [
+        {"time": "2026-11-08T10:21:00-0700", "outcome": "skipped", "task": None,
+         "detail": "repair waits for review: agent/repair-workday-bdo"},
+    ])  # fmt: skip
+    out = tmp_path / "outbox"
+    out.mkdir()
+    (out / "manifest.txt").write_text(
+        "branch=agent/repair-workday-bdo 1111111 2026-11-08T17:24:00+00:00 Workday caps\n"
+        "pending=agent/repair-workday-bdo\n"
+    )
+    health, problems = agent_health(logs, out, AGENT_FROM, AGENT_TO)
+    assert len(problems) == 1  # not also listed as "Agent work to review"
+    assert problems[0].startswith("Repair waiting for your review: agent/repair-workday-bdo.")
+    assert "agent.bundle" in problems[0]
+
+    # Once a session runs again (the review merged), the line goes away.
+    logs = agent_logs(tmp_path, [{"time": "2026-11-08T10:21:00-0700", "outcome": "skipped",
+                                  "task": None, "detail": "nothing to do"}])  # fmt: skip
+    (out / "manifest.txt").write_text("")
+    health, problems = agent_health(logs, out, AGENT_FROM, AGENT_TO)
+    assert problems == []
+
+
 def test_handoff_nothing_and_long_lines(tmp_path):
     f = tmp_path / "h.md"
     f.write_text("## Needs your attention\n\n- nothing\n")
