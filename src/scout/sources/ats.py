@@ -19,8 +19,10 @@ is the same set every run. Details are only fetched for postings Scout would kee
 posting on the board, or a title that matches a term in Metro Vancouver or remote.
 
 A search item with no title, `externalPath` or posting id is skipped and counted in
-`BoardResult.skipped`; the other items on the page still count. A response that is not
-JSON, has no `jobPostings` list, or whose page has no usable item at all is `structural`.
+`BoardResult.skipped`; the other items on the page still count. A response that has no
+`jobPostings` list is structural. A body that is not JSON (an HTML maintenance/outage page,
+or an empty body from a throttled request) is retried like a 5xx and is structural only if
+every attempt stays non-JSON.
 
 Each board is turned into a list of `BoardPosting` with the same fields whatever the ATS.
 Workplace comes from the ATS's own field (Ashby `workplaceType`, Lever `workplaceType`),
@@ -648,14 +650,12 @@ def _fetch_workday(
                 {"appliedFacets": {}, "limit": WORKDAY_PAGE_SIZE, "offset": offset,
                  "searchText": term}
             ).encode()  # fmt: skip
-            raw, error, status = _post_with_retries(search, body, post, sleep)
+            data, raw, error, status = _post_json_with_retries(search, body, post, sleep)
             if raw is None:
                 res.outcome, res.error, res.postings = _outcome_for_status(status), error, []
                 return res
-            try:
-                data = json.loads(raw)
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                res.outcome, res.error, res.postings = "structural", f"unexpected response: {e}", []
+            if data is None:
+                res.outcome, res.error, res.postings = "structural", error, []
                 return res
             if not isinstance(data, dict) or not isinstance(data.get("jobPostings"), list):
                 res.outcome = "structural"
@@ -742,6 +742,30 @@ def _post_with_retries(
     url: str, body: bytes, post: Post, sleep
 ) -> tuple[bytes | None, str | None, int | None]:
     return _retry(lambda: post(url, body), sleep)
+
+
+def _post_json_with_retries(
+    url: str, body: bytes, post: Post, sleep
+) -> tuple[object | None, bytes | None, str | None, int | None]:
+    """POST and parse JSON, retrying a body that isn't JSON.
+
+    Workday answers a search with an HTML maintenance/outage page, or occasionally with an
+    empty body, while the tenant is down or a request is throttled. That is not a format
+    change, so retry it like a 5xx; only a body that stays non-JSON is structural.
+    Returns (parsed, body, error, http_status); parsed is None on failure.
+    """
+    raw, error, status = None, None, None
+    for attempt in range(RETRIES + 1):
+        raw, error, status = _post_with_retries(url, body, post, sleep)
+        if raw is None:
+            return None, raw, error, status
+        try:
+            return json.loads(raw), raw, None, None
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            error = f"unexpected response: {e}"
+        if attempt < RETRIES:
+            sleep(RETRY_WAIT * (attempt + 1))
+    return None, raw, error, status
 
 
 def fetch_board(
