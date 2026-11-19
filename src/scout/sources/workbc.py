@@ -91,7 +91,9 @@ def http_post(url: str, body: dict) -> bytes:
         with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
             return resp.read()
     except urllib.error.HTTPError as e:
-        raise HttpError(e.code, e.read()[:2000], retry_after_seconds(e.headers.get("Retry-After"))) from None
+        raise HttpError(
+            e.code, e.read()[:2000], retry_after_seconds(e.headers.get("Retry-After"))
+        ) from None
     except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
         raise TransportError(str(getattr(e, "reason", e))) from None
 
