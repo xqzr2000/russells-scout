@@ -59,6 +59,7 @@ class BoardStats:
     error: str | None = None
     on_board: int = 0
     skipped: int = 0
+    details_failed: int = 0
     matched: int = 0
     with_pay: int = 0
     with_description: int = 0
@@ -201,9 +202,10 @@ def _match_workbc(conn, bp: BoardPosting, bs: BoardStats, dry_run: bool) -> bool
     else:
         found = conn.execute(
             """
-            UPDATE postings SET description = %s, pay_min = %s, pay_max = %s,
-                pay_currency = %s, pay_period = %s, ats_workplace = %s, location_text = %s,
-                enriched_at = now()
+            UPDATE postings SET description = coalesce(%s, description), pay_min = %s,
+                pay_max = %s, pay_currency = %s, pay_period = %s,
+                ats_workplace = coalesce(nullif(%s, 'unknown'), ats_workplace, 'unknown'),
+                location_text = coalesce(%s, location_text), enriched_at = now()
             WHERE found_via = 'workbc' AND ats = %s
               AND (lower(ats_board) = lower(%s) OR ats_board IS NULL)  -- posting ids are unique per ATS
               AND ats_posting_id = %s
@@ -220,6 +222,16 @@ def _match_workbc(conn, bp: BoardPosting, bs: BoardStats, dry_run: bool) -> bool
     bs.with_description += bool(bp.description)
     bs.with_workplace += bp.workplace != "unknown"
     return True
+
+
+# A Workday detail page that doesn't load leaves these empty; keep what an earlier run saved
+# instead of wiping it (2026-11-19: throttled detail pages would have erased descriptions).
+_KEEP_IF_MISSING = {
+    "description": "{c} = coalesce(%s, {c})",
+    "location_text": "{c} = coalesce(%s, {c})",
+    "workplace": "{c} = coalesce(nullif(%s, 'unknown'), {c}, 'unknown')",
+    "ats_workplace": "{c} = coalesce(nullif(%s, 'unknown'), {c}, 'unknown')",
+}
 
 
 def _save_board_posting(conn, bp, bs, cfg, *, run_id, source_id, employer, dry_run) -> str | None:
@@ -261,7 +273,7 @@ def _save_board_posting(conn, bp, bs, cfg, *, run_id, source_id, employer, dry_r
         bs.new += 1
         return bp.posting_id
     pid, status, old_hash = old[0], old[1], old[2]
-    sets = ", ".join(f"{c} = %s" for c in values)
+    sets = ", ".join(_KEEP_IF_MISSING.get(c, "{c} = %s").format(c=c) for c in values)
     conn.execute(
         f"UPDATE postings SET {sets}, status = 'active', last_seen_at = now(), missed_runs = 0,"
         " enriched_at = now() WHERE id = %s",
@@ -398,7 +410,13 @@ def enrich(
             terms=cfg.terms, metro=cfg.area.metro, keep_ids=keep_ids,
         )  # fmt: skip
         bs = BoardStats(
-            ats, board, res.outcome, res.error, on_board=len(res.postings), skipped=res.skipped
+            ats,
+            board,
+            res.outcome,
+            res.error,
+            on_board=len(res.postings),
+            skipped=res.skipped,
+            details_failed=res.details_failed,
         )
         if dry_run:
             _apply_board(conn, res, cfg, None, bs, dry_run=True)
@@ -423,6 +441,13 @@ def enrich(
     return stats
 
 
+def _note(b: BoardStats) -> str:
+    parts = [b.error] if b.error else []
+    if b.details_failed:
+        parts.append(f"{b.details_failed} detail page(s) didn't load")
+    return "; ".join(parts)
+
+
 def report(stats: EnrichStats, out=print, dry_run: bool = False) -> None:
     out("")
     title = "would enrich (dry run)" if dry_run else f"enrichment (run {stats.run_id})"
@@ -441,7 +466,7 @@ def report(stats: EnrichStats, out=print, dry_run: bool = False) -> None:
         out(
             f"  {name:34} {b.outcome:10} {b.on_board:>8} {b.skipped:>7} {b.matched:>7}"
             f" {b.with_pay:>4} {b.new if not dry_run else len(b.candidates):>4}"
-            f"  {b.error or ''}"
+            f"  {_note(b)}"
         )
     matched = sum(b.matched for b in stats.boards)
     out(

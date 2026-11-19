@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -223,6 +224,47 @@ def test_rerun_and_sweep_keep_everything_stable(conn):
     assert one(conn, "SELECT count(*) FROM posting_events")[0] == events
     sweep_save(conn)  # the WorkBC link names no board: the discovered one must stay
     assert one(conn, "SELECT ats_board FROM postings WHERE workbc_job_id = 'w4'") == ("asana",)
+
+
+def test_report_notes_detail_pages_that_didnt_load(capsys):
+    stats = enrich.EnrichStats(boards=[
+        enrich.BoardStats("workday", "remitly/Careers", on_board=21, details_failed=6),
+        enrich.BoardStats("workday", "acme/Jobs", "transient", "HTTP 429", details_failed=1),
+    ])  # fmt: skip
+    enrich.report(stats)
+    out = capsys.readouterr().out
+    assert "6 detail page(s) didn't load" in out
+    assert "HTTP 429; 1 detail page(s) didn't load" in out
+
+
+@needs_db
+def test_details_that_dont_load_keep_what_was_saved(conn, monkeypatch):
+    # 2026-11-19: a throttled Workday detail page leaves description and workplace empty;
+    # the next run must not wipe what an earlier run saved.
+    sweep_save(conn)
+    run(conn)
+    before = one(conn, "SELECT description, ats_workplace, location_text FROM postings"
+                       " WHERE workbc_job_id = 'w1'")  # fmt: skip
+    board_only = "SELECT description, workplace FROM postings WHERE found_via = 'ats'" \
+        " AND description IS NOT NULL ORDER BY id LIMIT 1"  # fmt: skip
+    saved = one(conn, board_only)
+    assert before[0] and saved and saved[0]
+
+    real = ats.fetch_board
+
+    def no_details(*a, **kw):
+        res = real(*a, **kw)
+        res.postings = [
+            replace(p, description=None, workplace="unknown", location=None) for p in res.postings
+        ]
+        return res
+
+    monkeypatch.setattr(ats, "fetch_board", no_details)
+    run(conn)
+    after = one(conn, "SELECT description, ats_workplace, location_text FROM postings"
+                      " WHERE workbc_job_id = 'w1'")  # fmt: skip
+    assert after == before
+    assert one(conn, board_only) == saved
 
 
 @needs_db
