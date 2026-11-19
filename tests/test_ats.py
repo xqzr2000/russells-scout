@@ -687,3 +687,11 @@ def test_workday_looks_for_the_facet_on_each_term_until_found():
 )
 def test_workday_without_a_usable_canada_facet_searches_worldwide(facets):
     assert ats._workday_country_facet(facets) is None
+
+
+def test_workday_counts_detail_pages_that_dont_load():
+    # 2026-11-19: remitly's search answered but no detail page did (6 matched, 0 descriptions).
+    res, _, _ = wd_fetch(get=wd_get(details={}))  # every detail GET is a 404
+    assert res.outcome == "ok" and len(res.postings) == 4
+    assert res.details_failed == 3  # the three postings Scout would keep
+    assert all(p.description is None for p in res.postings)

@@ -165,6 +165,7 @@ class BoardResult:
     error: str | None = None
     url: str | None = None
     skipped: int = 0  # unusable items passed over (Workday search results)
+    details_failed: int = 0  # Workday detail pages that didn't load (the list's fields are kept)
 
     @property
     def ok(self) -> bool:
@@ -747,13 +748,16 @@ def _fetch_workday(
         url = WORKDAY_JOB.format(host=host, tenant=tenant, site=site, path=paths[posting_id])
         raw, _error, _status = _get_with_retries(url, get, sleep)
         if raw is None:  # keep the list's fields; one bad detail must not lose the board
+            res.details_failed += 1
             continue
         try:
             info = json.loads(raw).get("jobPostingInfo")
         except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
-            continue
+            info = None
         if isinstance(info, dict):
             seen[posting_id] = _workday_detail(info, bp, metro)
+        else:
+            res.details_failed += 1
     res.postings = list(seen.values())
     res.outcome, res.error = ("ok" if res.postings else "empty"), None
     return res
