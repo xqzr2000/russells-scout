@@ -75,9 +75,12 @@ MAX_RETRY_AFTER = 60.0  # don't let one board's Retry-After stall the whole enri
 MAX_DESCRIPTION = 20_000
 WORKDAY_PAGE_SIZE = 20  # the API's maximum
 # A backstop: the Canada facet (below) keeps searches small. Without it, cxs reports `total`
-# capped at 2000, so a broad term on a large board would page ~100 times (accenture: ~850
-# requests for the ten configured terms) and get the whole run throttled.
-WORKDAY_MAX_PAGES_PER_TERM = 10
+# capped at 2000, so a broad term on a large board would page ~100 times per term (accenture:
+# ~850 requests for the ten configured terms) and get the whole run throttled. The cap is per
+# term, so ten terms still meant up to 100 requests on every board with no Canada facet
+# (hpe, mastercard, marvell, equinix: 280-1700 jobs each, 2026-11-20). 60 results per term
+# is plenty for a Metro Vancouver search and keeps a whole run to a few hundred requests.
+WORKDAY_MAX_PAGES_PER_TERM = 3
 WORKDAY_COUNTRY = "Canada"
 _FACET_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
