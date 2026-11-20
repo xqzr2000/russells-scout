@@ -402,21 +402,24 @@ def enrich(
         if n or stats.discovered or stats.not_found:
             sleep(delay)
         keep_ids: set[str] = set()
+        keep_paths: dict[str, str] = {}
         if ats == "workday":
             # WorkBC postings found on this board must get their details, even when the
-            # board's own location text would not pass the board-only area filter.
-            keep_ids = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT ats_posting_id FROM postings WHERE found_via = 'workbc'"
-                    " AND ats = 'workday' AND lower(ats_board) = lower(%s)"
-                    " AND status = 'active' AND ats_posting_id IS NOT NULL",
-                    (board,),
-                )
-            }
+            # board's own location text would not pass the board-only area filter, or the
+            # capped search doesn't reach them (then from the WorkBC link's path).
+            for posting_id, link in conn.execute(
+                "SELECT ats_posting_id, jump_url FROM postings WHERE found_via = 'workbc'"
+                " AND ats = 'workday' AND lower(ats_board) = lower(%s)"
+                " AND status = 'active' AND ats_posting_id IS NOT NULL",
+                (board,),
+            ).fetchall():
+                keep_ids.add(posting_id)
+                path = ats_api.workday_job_path(link, posting_id)
+                if path:
+                    keep_paths[posting_id] = path
         res = ats_api.fetch_board(
             ats, board, get=get, post=post, sleep=sleep, host=host,
-            terms=cfg.terms, metro=cfg.area.metro, keep_ids=keep_ids,
+            terms=cfg.terms, metro=cfg.area.metro, keep_ids=keep_ids, keep_paths=keep_paths,
         )  # fmt: skip
         bs = BoardStats(
             ats,

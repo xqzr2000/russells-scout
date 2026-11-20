@@ -75,9 +75,12 @@ MAX_RETRY_AFTER = 60.0  # don't let one board's Retry-After stall the whole enri
 MAX_DESCRIPTION = 20_000
 WORKDAY_PAGE_SIZE = 20  # the API's maximum
 # A backstop: the Canada facet (below) keeps searches small. Without it, cxs reports `total`
-# capped at 2000, so a broad term on a large board would page ~100 times (accenture: ~850
-# requests for the ten configured terms) and get the whole run throttled.
-WORKDAY_MAX_PAGES_PER_TERM = 10
+# capped at 2000, so a broad term on a large board would page ~100 times per term (accenture:
+# ~850 requests for the ten configured terms) and get the whole run throttled. The cap is per
+# term, so ten terms still meant up to 100 requests on every board with no Canada facet
+# (hpe, mastercard, marvell, equinix: 280-1700 jobs each, 2026-11-20). 60 results per term
+# is plenty for a Metro Vancouver search and keeps a whole run to a few hundred requests.
+WORKDAY_MAX_PAGES_PER_TERM = 3
 WORKDAY_COUNTRY = "Canada"
 _FACET_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
@@ -542,6 +545,25 @@ def _workday_path_location(path: str) -> str | None:
     return None
 
 
+_WORKDAY_PATH = re.compile(r"/job/[^/?#\s]{1,200}/[^/?#\s]{1,300}")
+
+
+def workday_job_path(url: str | None, posting_id: str) -> str | None:
+    """`/job/<location>/<slug>_<id>` from a WorkBC posting's Workday link, if it is one for
+    this posting id. Links look like `https://{tenant}.wd3.myworkdayjobs.com/[en-US/]{site}/job/…`.
+    """
+    if not url:
+        return None
+    path = urlparse(url).path
+    i = path.find("/job/")
+    if i < 0:
+        return None
+    path = path[i:].rstrip("/")
+    if not _WORKDAY_PATH.fullmatch(path) or ".." in path or _workday_id(path) != posting_id:
+        return None
+    return path
+
+
 def _workday_list_item(
     board: str, host: str, site: str, item: object, metro: Iterable[str], index: int
 ) -> tuple[BoardPosting, str]:
@@ -657,6 +679,7 @@ def _fetch_workday(
     terms: Iterable[str],
     metro: Iterable[str],
     keep_ids: set[str],
+    keep_paths: dict[str, str],
     get: Get,
     post: Post,
     sleep,
@@ -766,6 +789,31 @@ def _fetch_workday(
             seen[posting_id] = _workday_detail(info, bp, metro)
         else:
             res.details_failed += 1
+    # WorkBC postings the capped search didn't reach (a big board with no Canada facet ranks
+    # them past the first pages): their detail page straight from the WorkBC link.
+    missing = [(p, path) for p, path in keep_paths.items() if p not in seen and p in keep_ids]
+    for posting_id, path in [] if res.throttled else missing:
+        sleep(1.0)
+        url = WORKDAY_JOB.format(host=host, tenant=tenant, site=site, path=path)
+        raw, _error, status = _get_with_retries(url, get, sleep)
+        if raw is None:
+            res.details_failed += 1
+            if status == 429:
+                res.throttled = True
+                break
+            continue
+        try:
+            info = json.loads(raw).get("jobPostingInfo")
+        except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
+            info = None
+        if not isinstance(info, dict) or not str(info.get("title") or "").strip():
+            res.details_failed += 1
+            continue
+        base = BoardPosting(
+            "workday", board, posting_id, title="", url=f"https://{host}/{site}{path}",
+            location=_workday_path_location(path),
+        )  # fmt: skip
+        seen[posting_id] = _workday_detail(info, base, metro)
     res.postings = list(seen.values())
     res.outcome, res.error = ("ok" if res.postings else "empty"), None
     return res
@@ -838,11 +886,13 @@ def fetch_board(
     terms: Iterable[str] = (),
     metro: Iterable[str] = (),
     keep_ids: Iterable[str] = (),
+    keep_paths: dict[str, str] | None = None,
 ) -> BoardResult:
     """Fetch and parse one board. Never raises for HTTP or data problems.
 
-    `host`, `terms`, `metro` and `keep_ids` are used by Workday only: the host comes from a
-    posting's link or the employer, and the rest from the search config and saved postings.
+    `host`, `terms`, `metro`, `keep_ids` and `keep_paths` are used by Workday only: the host
+    comes from a posting's link or the employer, and the rest from the search config and saved
+    postings (`keep_paths`: posting id -> `/job/…` path of a WorkBC posting's link).
     """
     if ats not in SUPPORTED:
         return BoardResult(ats, board, "structural", error=f"unsupported ATS {ats!r}")
@@ -851,7 +901,7 @@ def fetch_board(
     if ats == "workday":
         return _fetch_workday(
             board, host=host, terms=terms, metro=metro, keep_ids=set(keep_ids),
-            get=get, post=post, sleep=sleep,
+            keep_paths=dict(keep_paths or {}), get=get, post=post, sleep=sleep,
         )  # fmt: skip
     res = BoardResult(ats, board)
     raw = None
