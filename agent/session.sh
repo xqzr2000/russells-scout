@@ -188,6 +188,9 @@ fi
 #   the last outcome was structural (the format changed), or
 #   N >= 3 (it keeps failing), or the status is degraded.
 # Never for restricted or disabled sources: the rules say to leave a blocked site alone.
+# Never when the last error is HTTP 429: the platform is throttling Scout, waiting is the fix,
+# and a session's live probes would only keep the throttle going (2026-11-20: all Workday
+# boards). Enrich itself stops trying a throttled platform's boards for the rest of a run.
 repair=()
 if ((status_ok)); then
   mapfile -t repair < <(python3 -I - "$BRIEF/status.txt" <<'PY'
@@ -202,7 +205,7 @@ for line in open(sys.argv[1], errors="replace"):
     if not m:
         continue
     name, status, fails, outcome = m[1], m[2], int(m[3]), m[4]
-    if status in ("restricted", "disabled"):
+    if status in ("restricted", "disabled") or line.rstrip().endswith(": HTTP 429"):
         continue
     if outcome == "structural" or fails >= 3 or status == "degraded":
         print(name)

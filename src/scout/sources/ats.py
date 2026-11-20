@@ -166,6 +166,7 @@ class BoardResult:
     url: str | None = None
     skipped: int = 0  # unusable items passed over (Workday search results)
     details_failed: int = 0  # Workday detail pages that didn't load (the list's fields are kept)
+    throttled: bool = False  # the board answered HTTP 429 even after the retries
 
     @property
     def ok(self) -> bool:
@@ -690,6 +691,7 @@ def _fetch_workday(
             data, raw, error, status = _post_json_with_retries(search, body, post, sleep)
             if raw is None:
                 res.outcome, res.error, res.postings = _outcome_for_status(status), error, []
+                res.throttled = status == 429
                 return res
             if data is None:
                 res.outcome, res.error, res.postings = "structural", error, []
@@ -741,12 +743,18 @@ def _fetch_workday(
             sleep(1.0)
         sleep(1.0)
     # Details only for the postings Scout would keep (and any WorkBC posting on the board).
-    for posting_id, bp in seen.items():
-        if posting_id not in keep_ids and not _workday_keep(bp, terms, metro):
-            continue
+    wanted = [p for p, bp in seen.items() if p in keep_ids or _workday_keep(bp, terms, metro)]
+    for n, posting_id in enumerate(wanted):
+        bp = seen[posting_id]
         sleep(1.0)
         url = WORKDAY_JOB.format(host=host, tenant=tenant, site=site, path=paths[posting_id])
-        raw, _error, _status = _get_with_retries(url, get, sleep)
+        raw, _error, status = _get_with_retries(url, get, sleep)
+        if raw is None and status == 429:
+            # Throttled: the other detail pages would only collect 429s too and keep the
+            # throttle going. Keep the list's fields for all of them.
+            res.throttled = True
+            res.details_failed += len(wanted) - n
+            break
         if raw is None:  # keep the list's fields; one bad detail must not lose the board
             res.details_failed += 1
             continue

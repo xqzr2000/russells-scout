@@ -387,6 +387,9 @@ def test_source_needing_attention_starts_a_repair(box):
         ("ashby:z: restricted, 5 failure(s) in a row, last restricted: HTTP 403", False),
         ("ashby:z: disabled, 0 failure(s) in a row, last structural", False),
         ("workbc: active, 1 failure(s) in a row, last structural: no results key", True),
+        # Throttling: waiting is the fix, and a session's probes would keep it going.
+        ("workday:a/B: degraded, 10 failure(s) in a row, last transient: HTTP 429", False),
+        ("workday:a/B: active, 3 failure(s) in a row, last transient: HTTP 4290", True),
     ],
 )  # fmt: skip
 def test_only_real_breakage_starts_a_repair(box, line, repair):

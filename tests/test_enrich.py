@@ -344,6 +344,54 @@ def test_enrichment_passes_workday_host(conn, monkeypatch):
 
 
 @needs_db
+def test_a_throttling_platform_is_not_tried_again_in_the_same_run(conn, monkeypatch, capsys):
+    # 2026-11-20: Workday answered 429 to every board; trying the other 15 only kept the
+    # throttle going. After one 429, the rest of that platform's boards wait for the next
+    # run, with no failure recorded; other platforms carry on.
+    jobs = WORKBC + [
+        wjob(5, "Data Scientist", "Contoso",
+             "https://contoso.wd3.myworkdayjobs.com/Jobs/job/Vancouver-BC/Data-Scientist_R7"),
+        wjob(6, "Data Analyst", "Fabrikam",
+             "https://fabrikam.wd3.myworkdayjobs.com/Careers/job/Vancouver-BC/Data-Analyst_R8"),
+    ]  # fmt: skip
+    sweep_save(conn, jobs)
+    real = ats.fetch_board
+    tried: list[str] = []
+    answer = {"workday": ats.BoardResult("workday", "", "transient", error="HTTP 503")}
+
+    def fake(ats_name, board, **kw):
+        tried.append(f"{ats_name}:{board}")
+        if ats_name != "workday":
+            return real(ats_name, board, **kw)
+        return replace(answer["workday"], board=board)
+
+    monkeypatch.setattr(ats, "fetch_board", fake)
+    run(conn)  # both Workday boards fail (503): one failure each
+    answer["workday"] = ats.BoardResult(
+        "workday", "", "transient", error="HTTP 429", throttled=True
+    )
+    tried.clear()
+    s = run(conn)
+
+    workday = [t for t in tried if t.startswith("workday:")]
+    assert workday == ["workday:contoso/Jobs"]  # the first board only
+    assert "greenhouse:contoso" in tried  # other platforms carry on
+    assert s.deferred == ["workday:fabrikam/Careers"]
+    fails = dict(conn.execute(
+        "SELECT name, consecutive_failures FROM sources WHERE name LIKE 'workday:%'"
+    ).fetchall())  # fmt: skip
+    assert fails == {"workday:contoso/Jobs": 2, "workday:fabrikam/Careers": 1}
+    assert one(
+        conn,
+        "SELECT ok, notes FROM scout_runs WHERE kind = 'enrich' ORDER BY id DESC LIMIT 1",
+    ) == (False, f"{len(s.boards) + 1} job boards, 1 not tried: workday throttling")
+
+    enrich.report(s)
+    out = capsys.readouterr().out
+    assert "not tried, the platform is throttling (HTTP 429): 1 (workday:fabrikam/Careers)" in out
+
+
+@needs_db
 def test_amazon_end_to_end_from_a_workbc_link(conn):
     """A WorkBC posting linking to amazon.jobs is classified by links.py, matched on the
     Amazon search (one page per configured term) and gets its description, and the same job
