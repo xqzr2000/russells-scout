@@ -79,6 +79,7 @@ class EnrichStats:
     discovered: list[tuple[str, str]] = field(default_factory=list)  # (employer, board)
     not_found: list[str] = field(default_factory=list)
     boards: list[BoardStats] = field(default_factory=list)
+    deferred: list[str] = field(default_factory=list)  # boards not tried: platform throttling
     dup_groups: int = 0
     suspicious: int = 0
 
@@ -389,7 +390,15 @@ def enrich(
             "INSERT INTO scout_runs (kind) VALUES ('enrich') RETURNING id"
         ).fetchone()[0]
 
+    throttled: set[str] = set()  # job-board platforms that answered HTTP 429 in this run
     for n, (ats, board, host) in enumerate(boards):
+        if ats in throttled:
+            # All of a platform's boards share its API (every *.myworkdayjobs.com tenant),
+            # so after a 429 the rest would only collect 429s and keep the throttle going
+            # (2026-11-20: 16 Workday boards failed in one run). Not tried means no failure
+            # recorded either: the board's streak and status stay as they were.
+            stats.deferred.append(f"{ats}:{board}")
+            continue
         if n or stats.discovered or stats.not_found:
             sleep(delay)
         keep_ids: set[str] = set()
@@ -424,6 +433,8 @@ def enrich(
             with conn.transaction():
                 _apply_board(conn, res, cfg, stats.run_id, bs, dry_run=False)
         stats.boards.append(bs)
+        if res.throttled:
+            throttled.add(ats)
 
     if not dry_run:
         ok = sum(1 for b in stats.boards if b.outcome in ("ok", "empty"))
@@ -434,11 +445,20 @@ def enrich(
                 "UPDATE scout_runs SET finished_at = now(), ok = %s, terms_ok = %s,"
                 " terms_failed = %s, notes = %s WHERE id = %s",
                 (
-                    ok == len(stats.boards), ok, len(stats.boards) - ok,
-                    f"{len(stats.boards)} job boards", stats.run_id,
+                    ok == len(stats.boards) and not stats.deferred, ok, len(stats.boards) - ok,
+                    _run_notes(stats), stats.run_id,
                 ),
             )  # fmt: skip
     return stats
+
+
+def _run_notes(stats: EnrichStats) -> str:
+    total = len(stats.boards) + len(stats.deferred)
+    notes = f"{total} job boards"
+    if stats.deferred:
+        platforms = sorted({d.split(":", 1)[0] for d in stats.deferred})
+        notes += f", {len(stats.deferred)} not tried: {', '.join(platforms)} throttling"
+    return notes
 
 
 def _note(b: BoardStats) -> str:
@@ -493,3 +513,8 @@ def report(stats: EnrichStats, out=print, dry_run: bool = False) -> None:
     failed = [b for b in stats.boards if b.outcome not in ("ok", "empty")]
     if failed:
         out(f"  boards that failed: {len(failed)} (see v_source_health)")
+    if stats.deferred:
+        out(
+            f"  not tried, the platform is throttling (HTTP 429): {len(stats.deferred)}"
+            f" ({', '.join(stats.deferred)})"
+        )

@@ -7,6 +7,14 @@ Full design: [docs/architecture-plan.md](docs/architecture-plan.md) (v3.2).
 
 > This project uses Crawl4AI (<https://github.com/unclecode/crawl4ai>) for web data extraction.
 
+## Colab walkthrough
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/xqzr2000/russells-scout/blob/main/notebooks/Russells_Scout_Project_Walkthrough.ipynb)
+
+[Walk through Scout](./notebooks/Russells_Scout_Project_Walkthrough.ipynb) with checked-in fixtures: replay a WorkBC sweep,
+inspect ATS adapter failures, score a posting, and render a digest. The core lab needs no
+Docker, database server, or API key; the Chromium and live WorkBC labs are opt-in.
+
 ## Roadmap
 
 | Phase | What | Status |
