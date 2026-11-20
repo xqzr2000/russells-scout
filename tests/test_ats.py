@@ -695,3 +695,37 @@ def test_workday_counts_detail_pages_that_dont_load():
     assert res.outcome == "ok" and len(res.postings) == 4
     assert res.details_failed == 3  # the three postings Scout would keep
     assert all(p.description is None for p in res.postings)
+
+
+# -------------------------------------------------------------- Workday: throttling (429)
+
+
+def test_workday_search_429_marks_the_board_throttled():
+    post = FakePost(WD_SEARCH, WD_JOB_URLS, errors=[HttpError(429)] * (ats.RETRIES + 1))
+    res, post, get = wd_fetch(post=post)
+    assert (res.outcome, res.error, res.throttled) == ("transient", "HTTP 429", True)
+    assert len(post.bodies) == ats.RETRIES + 1 and get.urls == []
+
+
+def test_workday_other_failures_are_not_throttling():
+    post = FakePost(WD_SEARCH, WD_JOB_URLS, errors=[HttpError(503)] * (ats.RETRIES + 1))
+    res, _, _ = wd_fetch(post=post)
+    assert res.outcome == "transient" and not res.throttled
+
+
+def test_workday_stops_fetching_details_after_a_429():
+    # 2026-11-20: once Workday throttles, every further request collects a 429 and keeps the
+    # throttle going. The list's fields are kept for all of them.
+    class Throttled:
+        def __init__(self):
+            self.urls: list[str] = []
+
+        def __call__(self, url):
+            self.urls.append(url)
+            raise HttpError(429)
+
+    get = Throttled()
+    res, _, _ = wd_fetch(get=get)
+    assert res.outcome == "ok" and len(res.postings) == 4 and res.throttled
+    assert len(get.urls) == ats.RETRIES + 1  # the first detail page only, with its retries
+    assert res.details_failed == 3  # all three postings Scout would keep
