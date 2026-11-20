@@ -392,6 +392,26 @@ def test_a_throttling_platform_is_not_tried_again_in_the_same_run(conn, monkeypa
 
 
 @needs_db
+def test_enrichment_passes_workday_links_for_postings_the_search_may_miss(conn, monkeypatch):
+    jobs = WORKBC + [
+        wjob(5, "Data Scientist", "Fabrikam",
+             "https://fabrikam.wd3.myworkdayjobs.com/en-US/Careers/job/Vancouver-BC/Data-Scientist_R123"),
+    ]  # fmt: skip
+    sweep_save(conn, jobs)
+    calls = []
+
+    def fake_fetch_board(ats_name, board, **kw):
+        calls.append((ats_name, kw))
+        return ats.BoardResult(ats_name, board)
+
+    monkeypatch.setattr(ats, "fetch_board", fake_fetch_board)
+    run(conn)
+    (kw,) = [kw for name, kw in calls if name == "workday"]
+    assert kw["keep_ids"] == {"R123"}
+    assert kw["keep_paths"] == {"R123": "/job/Vancouver-BC/Data-Scientist_R123"}
+
+
+@needs_db
 def test_amazon_end_to_end_from_a_workbc_link(conn):
     """A WorkBC posting linking to amazon.jobs is classified by links.py, matched on the
     Amazon search (one page per configured term) and gets its description, and the same job

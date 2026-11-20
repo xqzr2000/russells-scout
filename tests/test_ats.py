@@ -729,3 +729,62 @@ def test_workday_stops_fetching_details_after_a_429():
     assert res.outcome == "ok" and len(res.postings) == 4 and res.throttled
     assert len(get.urls) == ats.RETRIES + 1  # the first detail page only, with its retries
     assert res.details_failed == 3  # all three postings Scout would keep
+
+
+# ---------------------------------------- Workday: WorkBC postings the capped search misses
+
+R999_PATH = "/job/Vancouver-BC/Senior-Data-Scientist_R999"
+R999_URL = ats.WORKDAY_JOB.format(host=WD_HOST, tenant="fabrikam", site="Careers", path=R999_PATH)
+
+
+@pytest.mark.parametrize(
+    "url, path",
+    [
+        (f"https://{WD_HOST}/Careers{R999_PATH}", R999_PATH),
+        (f"https://{WD_HOST}/en-US/Careers{R999_PATH}/?source=WorkBC", R999_PATH),
+        (f"https://{WD_HOST}/Careers/job/Vancouver-BC/Other_R1000", None),  # another posting
+        (f"https://{WD_HOST}/Careers/details/Senior-Data-Scientist_R999", None),
+        (f"https://{WD_HOST}/Careers/job/../x/Senior-Data-Scientist_R999", None),
+        (f"https://{WD_HOST}/Careers/job/Senior-Data-Scientist_R999", None),  # no location
+        (None, None),
+    ],
+)
+def test_workday_job_path_from_a_workbc_link(url, path):
+    assert ats.workday_job_path(url, "R999") == path
+
+
+def test_workday_fetches_a_workbc_posting_the_search_missed():
+    # 2026-11-20: big boards with no Canada facet are searched worldwide, 3 pages per term,
+    # so a WorkBC-linked Vancouver posting can rank past them. Its link names the detail page.
+    get = wd_get({**WD_JOB_URLS, R999_URL: WD_JOB_123})
+    res, _, get = wd_fetch(get=get, keep_ids={"R999"}, keep_paths={"R999": R999_PATH})
+    assert res.outcome == "ok" and res.details_failed == 0
+    r999 = {p.posting_id: p for p in res.postings}["R999"]
+    assert r999.title == "Data Scientist"  # from the detail page
+    assert r999.description and "Build models" in r999.description
+    assert get.urls[-1] == R999_URL
+    # One the search did find isn't fetched twice.
+    res, _, get = wd_fetch(
+        keep_ids={"R123"}, keep_paths={"R123": "/job/Vancouver-BC/Data-Scientist_R123"}
+    )
+    assert len(get.urls) == len(set(get.urls))
+
+
+def test_workday_workbc_posting_whose_page_is_gone_is_left_out():
+    res, _, _ = wd_fetch(keep_ids={"R999"}, keep_paths={"R999": R999_PATH})  # 404
+    assert res.outcome == "ok" and "R999" not in {p.posting_id for p in res.postings}
+    assert res.details_failed == 1
+
+
+def test_workday_throttled_board_doesnt_fetch_missed_workbc_postings():
+    class Throttled:
+        def __init__(self):
+            self.urls: list[str] = []
+
+        def __call__(self, url):
+            self.urls.append(url)
+            raise HttpError(429)
+
+    get = Throttled()
+    res, _, _ = wd_fetch(get=get, keep_ids={"R999"}, keep_paths={"R999": R999_PATH})
+    assert res.throttled and R999_URL not in get.urls
