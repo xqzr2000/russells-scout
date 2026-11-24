@@ -184,6 +184,19 @@ def _boards(
     return boards
 
 
+# One board's 429 can be that employer's own limit: accenture answered 429 in every run from
+# 11-19 to 11-24 while it alone, tried first, kept 14 other Workday boards from being tried.
+# Two throttled boards in a row means the platform is throttling.
+THROTTLE_STRIKES = 2
+
+
+def _healthy_first(conn, boards: list[tuple[str, str, str | None]]):
+    """Within each platform, boards with the shortest failure streak first, then by name: a
+    board that keeps failing is tried last, so it can't hold back the others."""
+    streak = dict(conn.execute("SELECT name, consecutive_failures FROM sources WHERE kind = 'ats'"))
+    return sorted(boards, key=lambda b: (b[0], streak.get(f"{b[0]}:{b[1]}") or 0, b[1]))
+
+
 def _employer_for_board(conn, ats: str, board: str) -> tuple[int | None, str | None]:
     row = conn.execute(
         "SELECT id, name FROM employers WHERE ats = %s AND lower(ats_board) = lower(%s)"
@@ -383,20 +396,21 @@ def enrich(
         _fill_boards_from_employers(conn)
     _discover_greenhouse(conn, stats, dry_run=dry_run, get=get, sleep=sleep, delay=delay)
     extra = [("greenhouse", b) for _, b in stats.discovered] if dry_run else []
-    boards = _boards(conn, only, extra)
+    boards = _healthy_first(conn, _boards(conn, only, extra))
 
     if not dry_run:
         stats.run_id = conn.execute(
             "INSERT INTO scout_runs (kind) VALUES ('enrich') RETURNING id"
         ).fetchone()[0]
 
-    throttled: set[str] = set()  # job-board platforms that answered HTTP 429 in this run
+    # Platforms whose last THROTTLE_STRIKES boards in a row answered HTTP 429 in this run.
+    strikes: dict[str, int] = {}
     for n, (ats, board, host) in enumerate(boards):
-        if ats in throttled:
+        if strikes.get(ats, 0) >= THROTTLE_STRIKES:
             # All of a platform's boards share its API (every *.myworkdayjobs.com tenant),
-            # so after a 429 the rest would only collect 429s and keep the throttle going
-            # (2026-11-20: 16 Workday boards failed in one run). Not tried means no failure
-            # recorded either: the board's streak and status stay as they were.
+            # so once it throttles Scout the rest would only collect 429s and keep the
+            # throttle going (2026-11-20: 16 Workday boards failed in one run). Not tried
+            # means no failure recorded either: the board's streak and status stay as is.
             stats.deferred.append(f"{ats}:{board}")
             continue
         if n or stats.discovered or stats.not_found:
@@ -436,8 +450,7 @@ def enrich(
             with conn.transaction():
                 _apply_board(conn, res, cfg, stats.run_id, bs, dry_run=False)
         stats.boards.append(bs)
-        if res.throttled:
-            throttled.add(ats)
+        strikes[ats] = strikes.get(ats, 0) + 1 if res.throttled else 0
 
     if not dry_run:
         ok = sum(1 for b in stats.boards if b.outcome in ("ok", "empty"))

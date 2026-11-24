@@ -343,44 +343,53 @@ def test_enrichment_passes_workday_host(conn, monkeypatch):
     assert kw["terms"] == CFG.terms and kw["metro"] == CFG.area.metro
 
 
-@needs_db
-def test_a_throttling_platform_is_not_tried_again_in_the_same_run(conn, monkeypatch, capsys):
-    # 2026-11-20: Workday answered 429 to every board; trying the other 15 only kept the
-    # throttle going. After one 429, the rest of that platform's boards wait for the next
-    # run, with no failure recorded; other platforms carry on.
-    jobs = WORKBC + [
-        wjob(5, "Data Scientist", "Contoso",
-             "https://contoso.wd3.myworkdayjobs.com/Jobs/job/Vancouver-BC/Data-Scientist_R7"),
-        wjob(6, "Data Analyst", "Fabrikam",
-             "https://fabrikam.wd3.myworkdayjobs.com/Careers/job/Vancouver-BC/Data-Analyst_R8"),
-    ]  # fmt: skip
-    sweep_save(conn, jobs)
+WORKDAY_JOBS = [
+    wjob(5, "Data Scientist", "Contoso",
+         "https://contoso.wd3.myworkdayjobs.com/Jobs/job/Vancouver-BC/Data-Scientist_R7"),
+    wjob(6, "Data Analyst", "Fabrikam",
+         "https://fabrikam.wd3.myworkdayjobs.com/Careers/job/Vancouver-BC/Data-Analyst_R8"),
+    wjob(7, "ML Engineer", "Northwind",
+         "https://northwind.wd5.myworkdayjobs.com/External/job/Vancouver-BC/ML-Engineer_R9"),
+]  # fmt: skip
+
+
+def fake_workday(monkeypatch, answers):
+    """Workday boards answer from `answers` (board -> BoardResult); others are real."""
     real = ats.fetch_board
     tried: list[str] = []
-    answer = {"workday": ats.BoardResult("workday", "", "transient", error="HTTP 503")}
 
     def fake(ats_name, board, **kw):
         tried.append(f"{ats_name}:{board}")
         if ats_name != "workday":
             return real(ats_name, board, **kw)
-        return replace(answer["workday"], board=board)
+        return replace(answers[board], board=board)
 
     monkeypatch.setattr(ats, "fetch_board", fake)
-    run(conn)  # both Workday boards fail (503): one failure each
-    answer["workday"] = ats.BoardResult(
-        "workday", "", "transient", error="HTTP 429", throttled=True
-    )
-    tried.clear()
+    return tried
+
+
+THROTTLED = ats.BoardResult("workday", "", "transient", error="HTTP 429", throttled=True)
+OK = ats.BoardResult("workday", "")
+
+
+@needs_db
+def test_a_throttling_platform_is_not_tried_again_in_the_same_run(conn, monkeypatch, capsys):
+    # 2026-11-20: Workday answered 429 to every board; trying the rest only kept the throttle
+    # going. After two throttled boards in a row, the rest of that platform's boards wait for
+    # the next run, with no failure recorded; other platforms carry on.
+    sweep_save(conn, WORKBC + WORKDAY_JOBS)
+    answers = dict.fromkeys(["contoso/Jobs", "fabrikam/Careers", "northwind/External"], THROTTLED)
+    tried = fake_workday(monkeypatch, answers)
     s = run(conn)
 
     workday = [t for t in tried if t.startswith("workday:")]
-    assert workday == ["workday:contoso/Jobs"]  # the first board only
+    assert workday == ["workday:contoso/Jobs", "workday:fabrikam/Careers"]
     assert "greenhouse:contoso" in tried  # other platforms carry on
-    assert s.deferred == ["workday:fabrikam/Careers"]
+    assert s.deferred == ["workday:northwind/External"]
     fails = dict(conn.execute(
         "SELECT name, consecutive_failures FROM sources WHERE name LIKE 'workday:%'"
     ).fetchall())  # fmt: skip
-    assert fails == {"workday:contoso/Jobs": 2, "workday:fabrikam/Careers": 1}
+    assert fails == {"workday:contoso/Jobs": 1, "workday:fabrikam/Careers": 1}
     assert one(
         conn,
         "SELECT ok, notes FROM scout_runs WHERE kind = 'enrich' ORDER BY id DESC LIMIT 1",
@@ -388,7 +397,33 @@ def test_a_throttling_platform_is_not_tried_again_in_the_same_run(conn, monkeypa
 
     enrich.report(s)
     out = capsys.readouterr().out
-    assert "not tried, the platform is throttling (HTTP 429): 1 (workday:fabrikam/Careers)" in out
+    assert "not tried, the platform is throttling (HTTP 429): 1 (workday:northwind/External)" in out
+
+    # Next run: northwind (no failures) goes first, the two that failed after it.
+    tried.clear()
+    run(conn)
+    assert [t for t in tried if t.startswith("workday:")][:2] == [
+        "workday:northwind/External", "workday:contoso/Jobs",
+    ]  # fmt: skip
+
+
+@needs_db
+def test_one_throttled_board_doesnt_hold_back_the_others(conn, monkeypatch):
+    # 11-19 to 11-24: accenture, first in name order, answered 429 in every run and kept 14
+    # other Workday boards from being tried. One employer's 429 isn't the platform's.
+    sweep_save(conn, WORKBC + WORKDAY_JOBS)
+    answers = {"contoso/Jobs": THROTTLED, "fabrikam/Careers": OK, "northwind/External": OK}
+    tried = fake_workday(monkeypatch, answers)
+    s = run(conn)
+    assert [t for t in tried if t.startswith("workday:")] == [
+        "workday:contoso/Jobs", "workday:fabrikam/Careers", "workday:northwind/External",
+    ]  # fmt: skip
+    assert s.deferred == []
+
+    # And a board that keeps failing is tried last from then on.
+    tried.clear()
+    run(conn)
+    assert [t for t in tried if t.startswith("workday:")][-1] == "workday:contoso/Jobs"
 
 
 @needs_db
