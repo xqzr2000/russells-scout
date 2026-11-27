@@ -190,11 +190,19 @@ def _boards(
 THROTTLE_STRIKES = 2
 
 
-def _healthy_first(conn, boards: list[tuple[str, str, str | None]]):
-    """Within each platform, boards with the shortest failure streak first, then by name: a
-    board that keeps failing is tried last, so it can't hold back the others."""
-    streak = dict(conn.execute("SELECT name, consecutive_failures FROM sources WHERE kind = 'ats'"))
-    return sorted(boards, key=lambda b: (b[0], streak.get(f"{b[0]}:{b[1]}") or 0, b[1]))
+def _least_recently_tried_first(conn, boards: list[tuple[str, str, str | None]]):
+    """Within each platform, the boards tried longest ago first (never tried: first of all),
+    then by name. A run that stops early for throttling leaves its untried boards at the
+    front for the next run, so every board gets its turn (11-24 to 11-27, ordering by
+    failure streak starved the boards stuck at 1 or 5 failures)."""
+    last_run = dict(  # run ids only grow, so the latest run that tried the board
+        conn.execute(
+            "SELECT s.name, max(rs.run_id) FROM sources s"
+            " JOIN run_source_results rs ON rs.source_id = s.id"
+            " WHERE s.kind = 'ats' GROUP BY s.name"
+        )
+    )
+    return sorted(boards, key=lambda b: (b[0], last_run.get(f"{b[0]}:{b[1]}") or 0, b[1]))
 
 
 def _employer_for_board(conn, ats: str, board: str) -> tuple[int | None, str | None]:
@@ -396,7 +404,7 @@ def enrich(
         _fill_boards_from_employers(conn)
     _discover_greenhouse(conn, stats, dry_run=dry_run, get=get, sleep=sleep, delay=delay)
     extra = [("greenhouse", b) for _, b in stats.discovered] if dry_run else []
-    boards = _healthy_first(conn, _boards(conn, only, extra))
+    boards = _least_recently_tried_first(conn, _boards(conn, only, extra))
 
     if not dry_run:
         stats.run_id = conn.execute(
@@ -417,7 +425,20 @@ def enrich(
             sleep(delay)
         keep_ids: set[str] = set()
         keep_paths: dict[str, str] = {}
+        have_details: set[str] = set()
         if ats == "workday":
+            # A detail page per posting is most of a board's requests, and what Workday
+            # throttles (11-26: searches ok, detail pages 429). Postings that already have a
+            # saved description don't need theirs again (the update keeps what's saved).
+            have_details = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT ats_posting_id FROM postings WHERE ats = 'workday'"
+                    " AND lower(ats_board) = lower(%s) AND status = 'active'"
+                    " AND ats_posting_id IS NOT NULL AND description IS NOT NULL",
+                    (board,),
+                )
+            }
             # WorkBC postings found on this board must get their details, even when the
             # board's own location text would not pass the board-only area filter, or the
             # capped search doesn't reach them (then from the WorkBC link's path).
@@ -434,6 +455,7 @@ def enrich(
         res = ats_api.fetch_board(
             ats, board, get=get, post=post, sleep=sleep, host=host,
             terms=cfg.terms, metro=cfg.area.metro, keep_ids=keep_ids, keep_paths=keep_paths,
+            have_details=have_details,
         )  # fmt: skip
         bs = BoardStats(
             ats,

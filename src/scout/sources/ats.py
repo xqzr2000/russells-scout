@@ -680,6 +680,7 @@ def _fetch_workday(
     metro: Iterable[str],
     keep_ids: set[str],
     keep_paths: dict[str, str],
+    have_details: set[str],
     get: Get,
     post: Post,
     sleep,
@@ -766,7 +767,12 @@ def _fetch_workday(
             sleep(1.0)
         sleep(1.0)
     # Details only for the postings Scout would keep (and any WorkBC posting on the board).
-    wanted = [p for p, bp in seen.items() if p in keep_ids or _workday_keep(bp, terms, metro)]
+    # Not for those whose details are already saved: the update keeps them.
+    wanted = [
+        p
+        for p, bp in seen.items()
+        if p not in have_details and (p in keep_ids or _workday_keep(bp, terms, metro))
+    ]
     for n, posting_id in enumerate(wanted):
         bp = seen[posting_id]
         sleep(1.0)
@@ -791,7 +797,11 @@ def _fetch_workday(
             res.details_failed += 1
     # WorkBC postings the capped search didn't reach (a big board with no Canada facet ranks
     # them past the first pages): their detail page straight from the WorkBC link.
-    missing = [(p, path) for p, path in keep_paths.items() if p not in seen and p in keep_ids]
+    missing = [
+        (p, path)
+        for p, path in keep_paths.items()
+        if p not in seen and p in keep_ids and p not in have_details
+    ]
     for posting_id, path in [] if res.throttled else missing:
         sleep(1.0)
         url = WORKDAY_JOB.format(host=host, tenant=tenant, site=site, path=path)
@@ -887,12 +897,14 @@ def fetch_board(
     metro: Iterable[str] = (),
     keep_ids: Iterable[str] = (),
     keep_paths: dict[str, str] | None = None,
+    have_details: Iterable[str] = (),
 ) -> BoardResult:
     """Fetch and parse one board. Never raises for HTTP or data problems.
 
     `host`, `terms`, `metro`, `keep_ids` and `keep_paths` are used by Workday only: the host
     comes from a posting's link or the employer, and the rest from the search config and saved
-    postings (`keep_paths`: posting id -> `/job/…` path of a WorkBC posting's link).
+    postings (`keep_paths`: posting id -> `/job/…` path of a WorkBC posting's link;
+    `have_details`: posting ids whose details are already saved, so no detail page for them).
     """
     if ats not in SUPPORTED:
         return BoardResult(ats, board, "structural", error=f"unsupported ATS {ats!r}")
@@ -901,7 +913,8 @@ def fetch_board(
     if ats == "workday":
         return _fetch_workday(
             board, host=host, terms=terms, metro=metro, keep_ids=set(keep_ids),
-            keep_paths=dict(keep_paths or {}), get=get, post=post, sleep=sleep,
+            keep_paths=dict(keep_paths or {}), have_details=set(have_details),
+            get=get, post=post, sleep=sleep,
         )  # fmt: skip
     res = BoardResult(ats, board)
     raw = None
