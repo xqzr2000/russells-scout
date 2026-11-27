@@ -788,3 +788,15 @@ def test_workday_throttled_board_doesnt_fetch_missed_workbc_postings():
     get = Throttled()
     res, _, _ = wd_fetch(get=get, keep_ids={"R999"}, keep_paths={"R999": R999_PATH})
     assert res.throttled and R999_URL not in get.urls
+
+
+def test_workday_skips_detail_pages_already_saved():
+    _, _, get = wd_fetch()
+    before = {u.rsplit("_", 1)[1] for u in get.urls}
+    res, _, get = wd_fetch(have_details={"R123", "R124"})
+    assert res.outcome == "ok" and len(res.postings) == 4
+    assert {u.rsplit("_", 1)[1] for u in get.urls} == before - {"R123", "R124"}
+    assert len(before - {"R123", "R124"}) < len(before)
+    # A WorkBC posting the search missed isn't fetched either when its details are saved.
+    res, _, get = wd_fetch(keep_ids={"R999"}, keep_paths={"R999": R999_PATH}, have_details={"R999"})
+    assert R999_URL not in get.urls

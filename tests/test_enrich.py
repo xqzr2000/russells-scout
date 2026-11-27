@@ -420,10 +420,43 @@ def test_one_throttled_board_doesnt_hold_back_the_others(conn, monkeypatch):
     ]  # fmt: skip
     assert s.deferred == []
 
-    # And a board that keeps failing is tried last from then on.
-    tried.clear()
+
+@needs_db
+def test_boards_take_turns_when_runs_stop_early(conn, monkeypatch):
+    # 11-24 to 11-27: ordering by failure streak let the healthy boards go first every run,
+    # so the boards stuck at 1 or 5 failures were never reached. The boards tried longest
+    # ago go first, so a run that stops early hands the next run the boards it left.
+    sweep_save(conn, WORKBC + WORKDAY_JOBS)
+    answers = dict.fromkeys(["contoso/Jobs", "fabrikam/Careers", "northwind/External"], THROTTLED)
+    tried = fake_workday(monkeypatch, answers)
+    order = []
+    for _ in range(4):
+        tried.clear()
+        run(conn)
+        order.append([t.split(":", 1)[1] for t in tried if t.startswith("workday:")])
+    boards = {"contoso/Jobs", "fabrikam/Careers", "northwind/External"}
+    assert order[0] == ["contoso/Jobs", "fabrikam/Careers"]
+    for before, now in zip(order, order[1:]):
+        (left,) = boards - set(before)
+        assert now[0] == left  # the board a run left out goes first in the next one
+
+
+@needs_db
+def test_saved_workday_details_arent_fetched_again(conn, monkeypatch):
+    # Detail pages are most of a board's requests and what Workday throttled on 11-26.
+    sweep_save(conn, WORKBC + WORKDAY_JOBS[:1])
+    conn.execute("UPDATE postings SET description = 'Saved.' WHERE workbc_job_id = 'w5'")
+    calls = []
+
+    def fake_fetch_board(ats_name, board, **kw):
+        calls.append((ats_name, kw))
+        return ats.BoardResult(ats_name, board)
+
+    monkeypatch.setattr(ats, "fetch_board", fake_fetch_board)
     run(conn)
-    assert [t for t in tried if t.startswith("workday:")][-1] == "workday:contoso/Jobs"
+    (kw,) = [kw for name, kw in calls if name == "workday"]
+    assert kw["have_details"] == {"R7"} and kw["keep_ids"] == {"R7"}
+    assert one(conn, "SELECT description FROM postings WHERE workbc_job_id = 'w5'") == ("Saved.",)
 
 
 @needs_db
